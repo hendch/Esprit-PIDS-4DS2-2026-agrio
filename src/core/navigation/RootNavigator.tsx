@@ -8,7 +8,7 @@ export function RootNavigator() {
   const routes = featureRegistry.listRoutes();
 
   return (
-    <Stack.Navigator initialRouteName="Dashboard">
+    <Stack.Navigator initialRouteName="Login">
       {routes.map((r) => (
         <Stack.Screen key={r.name} name={r.name} component={r.component} options={r.options} />
       ))}

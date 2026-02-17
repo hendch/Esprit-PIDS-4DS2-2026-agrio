@@ -5,7 +5,7 @@ class FeatureRegistry {
 
   register(module: FeatureModule) {
     const exists = this.modules.some((m) => m.id === module.id);
-    if (exists) throw new Error(`FeatureModule id already registered: ${module.id}`);
+    if (exists) return; // already registered (e.g. hot reload or Strict Mode)
     this.modules.push(module);
   }
 

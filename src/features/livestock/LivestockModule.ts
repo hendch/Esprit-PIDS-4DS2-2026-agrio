@@ -4,7 +4,7 @@ import { LivestockScreen } from "./LivestockScreen";
 
 export const livestockModule: FeatureModule = {
   id: "livestock",
-  routes: [{ name: Routes.Livestock, component: LivestockScreen, options: { title: "Livestock" } }],
+  routes: [{ name: Routes.Livestock, component: LivestockScreen, options: { title: "Livestock", headerShown: false } }],
   dashboardEntry: {
     title: "Livestock Management",
     subtitle: "Health records, alerts, and sustainability tracking",

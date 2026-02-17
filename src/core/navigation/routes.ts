@@ -1,9 +1,13 @@
 export const Routes = {
+    Login: "Login",
     Dashboard: "Dashboard",
     Irrigation: "Irrigation",
     Satellite: "Satellite",
+    FieldDetail: "FieldDetail",
     DiseaseDetection: "DiseaseDetection",
     Livestock: "Livestock",
+    Community: "Community",
+    Alerts: "Alerts",
     FarmTrustLedger: "FarmTrustLedger",
   } as const;
   

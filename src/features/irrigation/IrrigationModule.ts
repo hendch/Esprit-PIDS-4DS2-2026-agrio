@@ -4,7 +4,7 @@ import { IrrigationScreen } from "./IrrigationScreen";
 
 export const irrigationModule: FeatureModule = {
   id: "irrigation",
-  routes: [{ name: Routes.Irrigation, component: IrrigationScreen, options: { title: "Irrigation" } }],
+  routes: [{ name: Routes.Irrigation, component: IrrigationScreen, options: { title: "Irrigation", headerShown: false } }],
   dashboardEntry: {
     title: "Autonomous Irrigation",
     subtitle: "FAO-56-based recommendations & water savings",

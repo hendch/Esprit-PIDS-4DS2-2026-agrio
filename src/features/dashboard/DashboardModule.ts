@@ -8,7 +8,7 @@ export const dashboardModule: FeatureModule = {
     {
       name: Routes.Dashboard,
       component: DashboardScreen,
-      options: { title: "AGRIO" },
+      options: { title: "AGRIO", headerShown: false },
     },
   ],
 };

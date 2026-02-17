@@ -1,10 +1,14 @@
 import type { FeatureModule } from "../../core/featureRegistry/FeatureModule";
 import { Routes } from "../../core/navigation/routes";
-import { SatelliteScreen } from "./SatelliteScreen";
+import { LandScreen } from "./LandScreen";
+import { FieldDetailScreen } from "./FieldDetailScreen";
 
 export const satelliteModule: FeatureModule = {
   id: "satellite",
-  routes: [{ name: Routes.Satellite, component: SatelliteScreen, options: { title: "Satellite" } }],
+  routes: [
+    { name: Routes.Satellite, component: LandScreen, options: { title: "Land Planning", headerShown: false } },
+    { name: Routes.FieldDetail, component: FieldDetailScreen, options: { title: "Field", headerShown: false } },
+  ],
   dashboardEntry: {
     title: "Satellite Insights",
     subtitle: "Field zones, stress detection, VRA guidance",
