@@ -1,0 +1,7 @@
+{
+  "python.analysis.extraPaths": [
+    "./backend/DSO1"
+  ],
+  "python.linting.pylintEnabled": false,
+  "python.linting.enabled": false
+}
