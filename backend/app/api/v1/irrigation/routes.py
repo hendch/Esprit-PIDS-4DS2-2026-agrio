@@ -1,55 +1,58 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
-
 from fastapi import APIRouter
 
-from .schemas import IrrigationLog, IrrigationOverride, IrrigationRecommendation
+from app.modules.irrigation.repository import IrrigationRepository
 
 router = APIRouter()
 
+_repo = IrrigationRepository()
+_agent = None
 
-@router.get("/recommendation/{field_id}", response_model=IrrigationRecommendation)
-async def get_recommendation(field_id: str) -> IrrigationRecommendation:
-    # TODO: inject service
-    return IrrigationRecommendation(
-        field_id=field_id,
-        date=date.today(),
-        eto_mm=4.2,
-        kc=0.85,
-        etc_mm=3.57,
-        decision="irrigate",
-        explanation={"reason": "soil moisture below threshold"},
+
+def _get_agent():
+    global _agent
+    if _agent is None:
+        from app.modules.ai.agent.orchestrator import IrrigationAgent
+
+        _agent = IrrigationAgent()
+    return _agent
+
+
+@router.post("/check")
+async def check_irrigation(data: dict):
+    """Ask the irrigation agent whether to irrigate."""
+    crop = data.get("crop", "wheat")
+    growth_stage = data.get("growth_stage", "mid")
+    lat = data.get("lat", 36.8)
+    lon = data.get("lon", 10.18)
+    query = f"Should I irrigate {crop} at {lat},{lon}?"
+    result = _get_agent().run(
+        query=query,
+        crop=crop,
+        growth_stage=growth_stage,
+        lat=float(lat),
+        lon=float(lon),
     )
+    return {"decision": result}
 
 
-@router.get("/logs/{field_id}", response_model=list[IrrigationLog])
-async def get_logs(field_id: str) -> list[IrrigationLog]:
-    # TODO: inject service
-    return [
-        IrrigationLog(
-            id="log-001",
-            field_id=field_id,
-            timestamp=datetime.now(tz=timezone.utc),
-            volume_liters=1200.0,
-            source="well",
-            method="drip",
-        )
-    ]
+@router.get("/history")
+async def get_history():
+    """Return recent irrigation events."""
+    rows = _repo.get_history()
+    return {"history": rows}
 
 
-@router.post("/override", response_model=dict)
-async def create_override(body: IrrigationOverride) -> dict:
-    # TODO: inject service
-    return {"status": "accepted", "field_id": body.field_id}
-
-
-@router.get("/usage/{field_id}", response_model=dict)
-async def get_usage(field_id: str) -> dict:
-    # TODO: inject service
-    return {
-        "field_id": field_id,
-        "period": "last_7_days",
-        "total_liters": 8400.0,
-        "avg_daily_liters": 1200.0,
-    }
+@router.get("/recommendation/{field_id}")
+async def get_recommendation(field_id: str):
+    """Get irrigation recommendation for a field (placeholder)."""
+    # TODO: look up field coords from farms module
+    result = _get_agent().run(
+        query=f"Should I irrigate the field {field_id}?",
+        crop="wheat",
+        growth_stage="mid",
+        lat=36.8,
+        lon=10.18,
+    )
+    return {"field_id": field_id, "recommendation": result}

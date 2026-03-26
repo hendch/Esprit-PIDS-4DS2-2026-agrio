@@ -10,11 +10,10 @@ from app.settings import settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    # TODO: initialise async DB engine / run startup migrations
-    # TODO: warm up ML model cache if needed
+    from app.modules.irrigation.repository import IrrigationRepository
+
+    IrrigationRepository().init_db()
     yield
-    # TODO: dispose DB engine pool
-    # TODO: flush any pending background tasks
 
 
 def create_app() -> FastAPI:

@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     disease_model_provider: Literal["remote", "mock"] = "mock"
     mqtt_provider: Literal["real", "mock"] = "mock"
 
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+
+    mqtt_broker_host: str = "test.mosquitto.org"
+    mqtt_broker_port: int = 1883
+    mqtt_sensor_topic: str = "farm/soil_moisture"
+    mqtt_command_topic: str = "farm/irrigation_command"
+
     open_meteo_base_url: str = "https://api.open-meteo.com"
     media_root: str = "./media"
 

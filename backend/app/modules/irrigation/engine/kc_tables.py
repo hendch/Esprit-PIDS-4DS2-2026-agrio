@@ -25,4 +25,10 @@ KC_TABLE: dict[str, dict[str, float]] = {
         "mid": 1.20,
         "late": 0.90,
     },
+    "barley": {
+        "initial": 0.30,
+        "development": 0.70,
+        "mid": 1.15,
+        "late": 0.25,
+    },
 }
