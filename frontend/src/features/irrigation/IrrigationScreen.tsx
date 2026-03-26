@@ -374,6 +374,7 @@ const styles = StyleSheet.create({
   logMsg: { fontSize: 14, fontWeight: "600", color: "#2C2C2C" },
   logField: { fontSize: 12, color: "#666", marginTop: 2 },
   logTime: { fontSize: 12, color: "#666" },
+  calendarIcon: { fontSize: 18, color: "#666" },
   overrideDesc: { fontSize: 14, color: "#555", marginBottom: 16, lineHeight: 22 },
   overrideButtons: { flexDirection: "row", gap: 12 },
   overrideBtn: {
