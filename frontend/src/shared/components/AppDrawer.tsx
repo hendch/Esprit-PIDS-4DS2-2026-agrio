@@ -61,7 +61,10 @@ export function AppDrawer() {
   const handleLogout = () => {
     closeDrawer();
     clearUser();
-    nav.reset({ index: 0, routes: [{ name: Routes.Login }] });
+    // Wait for auth-gated navigator tree to re-render before navigating.
+    setTimeout(() => {
+      nav.navigate(Routes.Login);
+    }, 0);
   };
 
   const name = displayName ?? "User";

@@ -1,5 +1,6 @@
 export const Routes = {
     Login: "Login",
+    SignUp: "SignUp",
     Dashboard: "Dashboard",
     Irrigation: "Irrigation",
     Satellite: "Satellite",

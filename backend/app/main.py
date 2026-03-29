@@ -23,7 +23,9 @@ async def autonomous_worker():
             if repo.get_autonomous_state():
                 logging.info("[Autonomous Worker] Mode ON. Evaluating field...")
                 agent = _get_agent()
-                agent.run(
+                # Run blocking agent call off the event loop so API stays responsive.
+                await asyncio.to_thread(
+                    agent.run,
                     query="System Background Tick: Should I irrigate the field A1?",
                     crop="wheat",
                     growth_stage="mid",
@@ -40,7 +42,9 @@ async def autonomous_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.modules.irrigation.repository import IrrigationRepository
+    from app.persistence.db import init_models
 
+    await init_models()
     IrrigationRepository().init_db()
     task = asyncio.create_task(autonomous_worker())
     yield
@@ -60,10 +64,12 @@ def create_app() -> FastAPI:
 
 
 def _register_middleware(application: FastAPI) -> None:
+    from app.middleware.auth import AuthMiddleware
     from app.middleware.cors import add_cors
     from app.middleware.logging import LoggingMiddleware
 
     add_cors(application)
+    application.add_middleware(AuthMiddleware)
     application.add_middleware(LoggingMiddleware)
 
 

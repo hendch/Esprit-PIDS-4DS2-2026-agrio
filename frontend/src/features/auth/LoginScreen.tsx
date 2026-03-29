@@ -8,28 +8,60 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useUserStore, getDisplayNameFromEmail } from "../../core/userStore/userStore";
+import { useUserStore } from "../../core/userStore/userStore";
 import { useTheme } from "../../core/theme/useTheme";
+import { authApi } from "./services/authApi";
+import { Routes } from "../../core/navigation/routes";
+import { getApiErrorMessage, validateEmail, validatePassword } from "./services/authValidation";
 
 export function LoginScreen() {
   const nav = useNavigation<any>();
   const { colors } = useTheme();
-  const setUser = useUserStore((s) => s.setUser);
+  const setAuth = useUserStore((s) => s.setAuth);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSignIn = () => {
-    const displayName = email.trim() ? getDisplayNameFromEmail(email) : "User";
-    setUser(displayName, email.trim() || undefined);
-    nav.navigate("Dashboard");
+  const handleSignIn = async () => {
+    const emailError = validateEmail(email);
+    if (emailError) {
+      Alert.alert("Invalid email", emailError);
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      Alert.alert("Invalid password", passwordError);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await authApi.login(email.trim(), password);
+      setAuth({
+        displayName: "User",
+        email: email.trim(),
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token,
+      });
+      // Wait for auth-gated navigator tree to re-render before navigating.
+      setTimeout(() => {
+        nav.navigate(Routes.Dashboard);
+      }, 0);
+    } catch (error: any) {
+      const message = getApiErrorMessage(error, "Sign-in failed. Please try again.");
+      Alert.alert("Sign-in failed", message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignIn = () => {
-    setUser("User");
-    nav.navigate("Dashboard");
+    Alert.alert("Coming soon", "Google sign-in is not enabled yet.");
   };
 
   return (
@@ -99,8 +131,8 @@ export function LoginScreen() {
         </View>
 
         {/* Sign In Button */}
-        <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
-          <Text style={styles.signInButtonText}>Sign In</Text>
+        <TouchableOpacity style={[styles.signInButton, loading && { opacity: 0.7 }]} onPress={handleSignIn} disabled={loading}>
+          <Text style={styles.signInButtonText}>{loading ? "Signing In..." : "Sign In"}</Text>
         </TouchableOpacity>
 
         {/* OR CONTINUE WITH Separator */}
@@ -119,7 +151,7 @@ export function LoginScreen() {
         {/* Sign Up Link */}
         <View style={styles.signUpContainer}>
           <Text style={styles.signUpText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => {}}>
+          <TouchableOpacity onPress={() => nav.navigate(Routes.SignUp)}>
             <Text style={styles.signUpLink}>Sign Up</Text>
           </TouchableOpacity>
         </View>

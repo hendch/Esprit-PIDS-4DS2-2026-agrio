@@ -10,7 +10,7 @@ from starlette.responses import Response
 
 from app.settings import settings
 
-_SKIP_PREFIXES = ("/health", "/auth/")
+_SKIP_PREFIXES = ("/health", "/auth/", "/docs", "/openapi", "/redoc")
 
 
 class AuthMiddleware(BaseHTTPMiddleware):

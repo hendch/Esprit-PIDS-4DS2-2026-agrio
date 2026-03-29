@@ -1,3 +1,4 @@
 .env
+agrio.db
 agrio_backend.egg-info
 __pycache__
