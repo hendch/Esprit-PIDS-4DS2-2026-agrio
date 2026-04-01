@@ -10,12 +10,25 @@ from starlette.responses import Response
 
 from app.settings import settings
 
-_SKIP_PREFIXES = ("/health", "/auth/")
+# Only these paths skip JWT. Do not use a broad "/auth/" match — e.g. `/api/v1/auth/me` must verify Bearer.
+_SKIP_PREFIXES = ("/health", "/docs", "/openapi", "/redoc")
+_PUBLIC_AUTH_PATHS = frozenset(
+    {
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/auth/refresh",
+    }
+)
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         path = request.url.path
+
+        normalized = path.rstrip("/") or "/"
+        if normalized in _PUBLIC_AUTH_PATHS:
+            return await call_next(request)
+
         if any(seg in path for seg in _SKIP_PREFIXES):
             return await call_next(request)
 

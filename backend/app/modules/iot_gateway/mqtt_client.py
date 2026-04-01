@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 
 import paho.mqtt.client as mqtt
 
@@ -24,35 +25,86 @@ class MqttSensorProvider:
         self._topic = topic
         self._client: mqtt.Client | None = None
         self._latest_moisture: float = 45.0
+        self._moisture_history: list[dict] = []
+        self._received_mqtt_payload: bool = False
 
     def _on_message(self, client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
         try:
             self._latest_moisture = float(msg.payload.decode())
+            self._received_mqtt_payload = True
+            current_time = datetime.now().strftime("%H:%M:%S")
+            self._moisture_history.append({"time": current_time, "value": self._latest_moisture})
+            if len(self._moisture_history) > 15:
+                self._moisture_history.pop(0)
+
             logger.info("MQTT moisture reading: %.1f%%", self._latest_moisture)
         except (ValueError, UnicodeDecodeError):
             logger.warning("Could not parse MQTT payload: %s", msg.payload)
+
+    def _on_connect(
+        self,
+        client: mqtt.Client,
+        userdata: object,
+        flags,
+        reason_code,
+        properties,
+    ) -> None:
+        if reason_code.is_failure:
+            logger.warning("MQTT CONNACK failure for sensor client: %s", reason_code)
+            return
+        client.subscribe(self._topic)
+        logger.info(
+            "MQTT sensor subscribed to %r on %s:%d",
+            self._topic,
+            self._broker_host,
+            self._broker_port,
+        )
 
     def connect(self) -> None:
         if self._client is not None:
             return
         self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        self._client.on_connect = self._on_connect
         self._client.on_message = self._on_message
         try:
             self._client.connect(self._broker_host, self._broker_port, 60)
-            self._client.subscribe(self._topic)
             self._client.loop_start()
-            logger.info("MQTT connected to %s:%d", self._broker_host, self._broker_port)
-        except Exception:
-            logger.warning("MQTT broker unavailable – using fallback moisture value")
+        except Exception as exc:
+            logger.warning(
+                "MQTT broker unavailable (%s:%d topic %r) – using fallback moisture: %s",
+                self._broker_host,
+                self._broker_port,
+                self._topic,
+                exc,
+            )
             self._client = None
 
-    def get_latest_reading_sync(self, device_id: str | None = None) -> dict:
-        self.connect()
-        time.sleep(0.5)
+    def _reading_payload(self, *, waited_for_message: bool) -> dict:
         return {
             "moisture_percent": self._latest_moisture,
             "status": "low" if self._latest_moisture < 60 else "adequate",
+            "history": self._moisture_history,
+            "mqtt_connected": self._client is not None,
+            "live": self._received_mqtt_payload,
+            "topic": self._topic,
+            "waited_for_message": waited_for_message,
         }
+
+    def get_latest_reading_sync(self, device_id: str | None = None) -> dict:
+        self.connect()
+        if self._client is None:
+            return self._reading_payload(waited_for_message=False)
+
+        # Wait until the first payload (Wokwi publishes every 3s; allow extra slack for TCP + SUBACK).
+        for _ in range(80):
+            if self._received_mqtt_payload:
+                break
+            time.sleep(0.1)
+        return self._reading_payload(waited_for_message=True)
+
+    def get_cached_reading(self) -> dict:
+        self.connect()
+        return self._reading_payload(waited_for_message=False)
 
     async def get_latest_reading(self, device_id: str) -> dict:
         return self.get_latest_reading_sync(device_id)

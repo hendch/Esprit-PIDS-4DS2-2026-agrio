@@ -2,18 +2,23 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic_settings import BaseSettings
+from pydantic import AliasChoices, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     app_name: str = "Agrio"
     debug: bool = False
 
-    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/agrio"
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@localhost:5432/agrio",
+        validation_alias=AliasChoices("DATABASE_URL", "AGRIO_DATABASE_URL"),
+    )
 
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440
+    jwt_refresh_expire_days: int = 30
 
     weather_provider: Literal["open_meteo", "mock"] = "mock"
     satellite_provider: Literal["sentinel", "demo"] = "demo"
@@ -32,7 +37,15 @@ class Settings(BaseSettings):
     open_meteo_base_url: str = "https://api.open-meteo.com"
     media_root: str = "./media"
 
-    model_config = {"env_prefix": "AGRIO_", "env_file": ".env"}
+    # Comma-separated; cannot use * when allow_credentials=True. Include Expo web dev server.
+    cors_origins: str = Field(
+        default=(
+            "http://localhost:8081,http://127.0.0.1:8081,"
+            "http://localhost:19006,http://127.0.0.1:19006"
+        ),
+    )
+
+    model_config = SettingsConfigDict(env_prefix="AGRIO_", env_file=".env")
 
 
 settings = Settings()

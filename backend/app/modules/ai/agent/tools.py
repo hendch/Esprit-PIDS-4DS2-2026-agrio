@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timedelta
+from typing import Any
 
 from langchain.tools import tool
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.modules.irrigation.engine.kc_tables import KC_TABLE
 from app.modules.irrigation.repository import IrrigationRepository
@@ -10,10 +15,19 @@ from app.modules.iot_gateway.mqtt_client import MqttCommandPublisher, MqttSensor
 from app.modules.weather.open_meteo_client import OpenMeteoWeatherProvider
 from app.settings import settings
 
+
+def _run_async_in_worker_thread(coro_factory: Callable[[], Coroutine[Any, Any, None]]) -> None:
+    """LangChain tools are sync. Worker thread runs its own asyncio loop with its own DB engine (not the app's global async_engine)."""
+
+    def _runner() -> None:
+        asyncio.run(coro_factory())
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result()
+
 _weather = OpenMeteoWeatherProvider()
 _sensor = MqttSensorProvider()
 _pump = MqttCommandPublisher()
-_repo = IrrigationRepository()
 
 
 @tool
@@ -56,5 +70,25 @@ def log_irrigation_event(
 ) -> dict:
     """Logs an irrigation event to the database with next-irrigation estimate."""
     next_irrigation = (datetime.now() + timedelta(days=3)).isoformat()
-    _repo.log_event(moisture, amount, duration, next_irrigation, crop, weather)
+
+    async def _do_log() -> None:
+        engine = create_async_engine(
+            settings.database_url,
+            echo=False,
+            pool_pre_ping=True,
+        )
+        try:
+            session_factory = async_sessionmaker(
+                bind=engine,
+                class_=AsyncSession,
+                expire_on_commit=False,
+            )
+            async with session_factory() as session:
+                await IrrigationRepository(session).log_event(
+                    moisture, amount, duration, next_irrigation, crop, weather
+                )
+        finally:
+            await engine.dispose()
+
+    _run_async_in_worker_thread(lambda: _do_log())
     return {"logged": True, "next_irrigation": next_irrigation}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   ScrollView,
   Text,
@@ -16,6 +16,7 @@ import { useUserStore } from "../../core/userStore/userStore";
 import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useTheme } from "../../core/theme/useTheme";
 import { GREEN, GREEN_LIGHT } from "../../core/theme/themeColors";
+import { authApi } from "../auth/services/authApi";
 const ORANGE_LIGHT = "#FFF3E0";
 const BLUE_LIGHT = "#E3F2FD";
 const BROWN_LIGHT = "#EFEBE9";
@@ -33,10 +34,30 @@ export function DashboardScreen() {
   const { width } = useWindowDimensions();
   const { colors } = useTheme();
   const displayName = useUserStore((s) => s.displayName);
+  const email = useUserStore((s) => s.email);
+  const accessToken = useUserStore((s) => s.accessToken);
+  const setUser = useUserStore((s) => s.setUser);
+  const [nameOverride, setNameOverride] = useState<string | null>(null);
   const greeting = getGreeting();
   const CARD_GAP = 12;
   const cardWidth = (width - 24 * 2 - CARD_GAP) / 2; // 2 columns, padding 24
-  const userName = displayName ?? "User";
+  const userName = nameOverride ?? displayName ?? "User";
+
+  useEffect(() => {
+    const loadCurrentUser = async () => {
+      if (!accessToken) return;
+      try {
+        const me = await authApi.me();
+        const profileName = me.display_name?.trim() || "User";
+        setNameOverride(profileName);
+        setUser(profileName, me.email);
+      } catch {
+        setNameOverride("User");
+      }
+    };
+
+    void loadCurrentUser();
+  }, [accessToken, email, setUser]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -63,7 +84,7 @@ export function DashboardScreen() {
             {greeting.text} {greeting.icon}
           </Text>
           <Text style={styles.greetingName}>{userName}!</Text>
-          <Text style={styles.greetingSub}>Your farm is performing well today</Text>
+          <Text style={styles.greetingSub}>Let's see how your farm is doing today!</Text>
         </View>
 
         {/* Today's Highlights */}

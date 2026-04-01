@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -8,12 +10,44 @@ from fastapi import FastAPI
 from app.settings import settings
 
 
+async def autonomous_worker():
+    from app.modules.irrigation.repository import IrrigationRepository
+    from app.api.v1.irrigation.routes import _get_agent
+    from app.persistence.db import AsyncSessionLocal
+
+    SLEEP_SECONDS = 60 * 60 * 6
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as session:
+                repo = IrrigationRepository(session)
+                is_on = await repo.get_autonomous_state()
+
+            if is_on:
+                logging.info("[Autonomous Worker] Mode ON. Evaluating field...")
+                agent = _get_agent()
+                await asyncio.to_thread(
+                    agent.run,
+                    query="System Background Tick: Should I irrigate the field A1?",
+                    crop="wheat",
+                    growth_stage="mid",
+                    lat=36.8,
+                    lon=10.18,
+                )
+        except Exception as e:
+            logging.error("[Autonomous Worker] Failed execution: %s", e)
+
+        await asyncio.sleep(SLEEP_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    from app.modules.irrigation.repository import IrrigationRepository
+    from app.persistence.db import init_models
 
-    IrrigationRepository().init_db()
+    await init_models()
+    task = asyncio.create_task(autonomous_worker())
     yield
+    task.cancel()
 
 
 def create_app() -> FastAPI:
@@ -29,11 +63,15 @@ def create_app() -> FastAPI:
 
 
 def _register_middleware(application: FastAPI) -> None:
+    from app.middleware.auth import AuthMiddleware
     from app.middleware.cors import add_cors
     from app.middleware.logging import LoggingMiddleware
 
-    add_cors(application)
+    # Last added = outermost. CORS must run first so OPTIONS preflight gets Allow-* headers
+    # before AuthMiddleware returns 401 without Authorization.
     application.add_middleware(LoggingMiddleware)
+    application.add_middleware(AuthMiddleware)
+    add_cors(application)
 
 
 def _register_routers(application: FastAPI) -> None:

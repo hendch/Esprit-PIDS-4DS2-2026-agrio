@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: agrio_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agrio
+    ports:
+      - "5432:5432"
+    volumes:
+      - agrio_pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agrio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  agrio_pgdata:

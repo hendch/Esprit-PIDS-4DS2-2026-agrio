@@ -8,28 +8,59 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
-import { useUserStore, getDisplayNameFromEmail } from "../../core/userStore/userStore";
+import { useUserStore } from "../../core/userStore/userStore";
 import { useTheme } from "../../core/theme/useTheme";
+import { authApi } from "./services/authApi";
+import { Routes } from "../../core/navigation/routes";
+import { getApiErrorMessage, validateEmail, validatePassword } from "./services/authValidation";
 
 export function LoginScreen() {
   const nav = useNavigation<any>();
   const { colors } = useTheme();
-  const setUser = useUserStore((s) => s.setUser);
+  const setAuth = useUserStore((s) => s.setAuth);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSignIn = () => {
-    const displayName = email.trim() ? getDisplayNameFromEmail(email) : "User";
-    setUser(displayName, email.trim() || undefined);
-    nav.navigate("Dashboard");
+  const handleSignIn = async () => {
+    const emailError = validateEmail(email);
+    if (emailError) {
+      Alert.alert("Invalid email", emailError);
+      return;
+    }
+
+    const passwordError = validatePassword(password);
+    if (passwordError) {
+      Alert.alert("Invalid password", passwordError);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await authApi.login(email.trim(), password);
+      setAuth({
+        displayName: "User",
+        email: email.trim(),
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token,
+      });
+      setTimeout(() => {
+        nav.navigate(Routes.Dashboard);
+      }, 0);
+    } catch (error: any) {
+      const message = getApiErrorMessage(error, "Sign-in failed. Please try again.");
+      Alert.alert("Sign-in failed", message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleGoogleSignIn = () => {
-    setUser("User");
-    nav.navigate("Dashboard");
+    Alert.alert("Coming soon", "Google sign-in is not enabled yet.");
   };
 
   return (
@@ -99,8 +130,12 @@ export function LoginScreen() {
         </View>
 
         {/* Sign In Button */}
-        <TouchableOpacity style={styles.signInButton} onPress={handleSignIn}>
-          <Text style={styles.signInButtonText}>Sign In</Text>
+        <TouchableOpacity
+          style={[styles.signInButton, loading && { opacity: 0.7 }]}
+          onPress={handleSignIn}
+          disabled={loading}
+        >
+          <Text style={styles.signInButtonText}>{loading ? "Signing In..." : "Sign In"}</Text>
         </TouchableOpacity>
 
         {/* OR CONTINUE WITH Separator */}
@@ -119,7 +154,7 @@ export function LoginScreen() {
         {/* Sign Up Link */}
         <View style={styles.signUpContainer}>
           <Text style={styles.signUpText}>Don't have an account? </Text>
-          <TouchableOpacity onPress={() => {}}>
+          <TouchableOpacity onPress={() => nav.navigate(Routes.SignUp)}>
             <Text style={styles.signUpLink}>Sign Up</Text>
           </TouchableOpacity>
         </View>
@@ -131,7 +166,7 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F5DC", // Light beige background
+    backgroundColor: "#F5F5DC",
   },
   scrollContent: {
     flexGrow: 1,
@@ -156,12 +191,12 @@ const styles = StyleSheet.create({
   logoText: {
     fontSize: 28,
     fontWeight: "700",
-    color: "#4CAF50", // Medium green
+    color: "#4CAF50",
   },
   welcomeText: {
     fontSize: 32,
     fontWeight: "800",
-    color: "#2C2C2C", // Dark grey/black
+    color: "#2C2C2C",
     marginBottom: 8,
   },
   subtitleText: {
@@ -187,7 +222,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F0F0F0", // Light grey background
+    backgroundColor: "#F0F0F0",
     borderRadius: 12,
     borderWidth: 1,
     borderColor: "#E0E0E0",
@@ -211,11 +246,11 @@ const styles = StyleSheet.create({
   },
   forgotPasswordText: {
     fontSize: 14,
-    color: "#4CAF50", // Medium green
+    color: "#4CAF50",
     fontWeight: "500",
   },
   signInButton: {
-    backgroundColor: "#4CAF50", // Medium green
+    backgroundColor: "#4CAF50",
     borderRadius: 12,
     height: 56,
     justifyContent: "center",
@@ -260,9 +295,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "700",
     marginRight: 12,
-    // Google colors: G is blue, o's are red/yellow/green, l is green, e is red
-    // For simplicity, using a colored G
-    color: "#4285F4", // Google blue
+    color: "#4285F4",
   },
   googleButtonText: {
     fontSize: 16,
@@ -280,7 +313,7 @@ const styles = StyleSheet.create({
   },
   signUpLink: {
     fontSize: 14,
-    color: "#4CAF50", // Medium green
+    color: "#4CAF50",
     fontWeight: "600",
   },
 });

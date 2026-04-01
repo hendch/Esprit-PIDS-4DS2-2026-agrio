@@ -3,5 +3,8 @@
     "./backend/DSO1"
   ],
   "python.linting.pylintEnabled": false,
-  "python.linting.enabled": false
+  "python.linting.enabled": false,
+  "cursorpyright.analysis.extraPaths": [
+    "./backend/DSO1"
+  ]
 }

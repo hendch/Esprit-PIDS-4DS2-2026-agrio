@@ -4,3 +4,5 @@ agrio_backend.egg-info/
 __pycache__/
 .pytest_cache/
 pytest-cache-files-*/
+agrio.db
+irrigation.db

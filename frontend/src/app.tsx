@@ -7,16 +7,18 @@ import { RootNavigator } from "./core/navigation/RootNavigator";
 import { AppBootstrap } from "./bootstrap/AppBootstrap";
 import { AppDrawer } from "./shared/components/AppDrawer";
 import { ThemeRoot } from "./shared/components/ThemeRoot";
+import { useUserStore } from "./core/userStore/userStore";
 
 function AppContent() {
   const { isDark } = useTheme();
+  const isAuthenticated = useUserStore((s) => s.isAuthenticated);
   return (
     <>
       <StatusBar barStyle={isDark ? "light-content" : "dark-content"} backgroundColor="transparent" />
       <ThemeRoot>
         <View style={{ flex: 1 }}>
           <RootNavigator />
-          <AppDrawer />
+          {isAuthenticated ? <AppDrawer /> : null}
         </View>
       </ThemeRoot>
     </>
