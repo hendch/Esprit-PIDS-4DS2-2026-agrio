@@ -1,8 +1,22 @@
+# Ignores paths under backend/ only (not the monorepo root).
+
+# Environment
 .env
 .venv/
+
+# Python
 agrio_backend.egg-info/
 __pycache__/
 .pytest_cache/
 pytest-cache-files-*/
+
+# Local databases (dev / legacy SQLite)
 agrio.db
 irrigation.db
+
+# Stray artifacts if tools write under backend/
+*.log
+node_modules/
+.expo/
+android/
+ios/

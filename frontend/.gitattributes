@@ -1,0 +1,4 @@
+# TFLite models (e.g. assets/model/*.tflite). Use Git LFS — after clone run:
+#   git lfs install
+#   git lfs pull
+*.tflite filter=lfs diff=lfs merge=lfs -text

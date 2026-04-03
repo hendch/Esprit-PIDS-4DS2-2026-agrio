@@ -1,8 +1,6 @@
-# Root-level generated artifacts (frontend commands should run inside ./frontend)
+# Only for mistaken runs from the repo root. The Expo app lives in ./frontend — use `cd frontend` first.
 .expo/
 android/
 ios/
 node_modules/
-
-# Common local files
 *.log

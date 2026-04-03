@@ -1,15 +1,19 @@
+# Ignores paths under frontend/ only. Run Expo from this directory (`cd frontend`).
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# dependencies
+# Dependencies
 node_modules/
 
-# Expo
+# Logs
+*.log
+
+# Expo (also covers mistaken `.expo/` only here, not at repo root)
 .expo/
 dist/
 web-build/
 expo-env.d.ts
 
-# Native
+# Native build / secrets
 .kotlin/
 *.orig.*
 *.jks
@@ -17,11 +21,14 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
+# Prebuild output at this folder level (equivalent to root-level `android/` / `ios/` for this app)
+/android
+/ios
 
 # Metro
 .metro-health-check*
 
-# debug
+# Debug
 npm-debug.*
 yarn-debug.*
 yarn-error.*
@@ -30,12 +37,8 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# Env
 .env*.local
 
-# typescript
+# TypeScript
 *.tsbuildinfo
-
-# generated native folders
-/ios
-/android
