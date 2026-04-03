@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    model_config = SettingsConfigDict(env_prefix="AGRIO_", env_file=".env")
+    model_config = SettingsConfigDict(env_prefix="AGRIO_", env_file=("backend.env", ".env"))
 
 
 settings = Settings()

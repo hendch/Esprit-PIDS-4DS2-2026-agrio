@@ -1,32 +1,42 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-from app.modules.disease.model_registry.interface import ModelRunner
+from app.modules.disease.models import DiseaseScan
 from app.modules.disease.repository import DiseaseRepository
 
 
 class DiseaseService:
-    def __init__(
-        self,
-        repo: DiseaseRepository,
-        model_runner: ModelRunner,
-        media_service: object,
-    ) -> None:
+    def __init__(self, repo: DiseaseRepository) -> None:
         self._repo = repo
-        self._model_runner = model_runner
-        self._media_service = media_service
 
-    async def run_scan(
+    async def save_scan(
         self,
-        image_bytes: bytes,
+        user_id: uuid.UUID,
+        disease_name: str,
+        confidence: float,
+        severity: str,
+        plant_name: str,
+        is_healthy: bool,
+        guidance: str | None = None,
         field_id: uuid.UUID | None = None,
-        notes: str | None = None,
-    ) -> dict:
-        raise NotImplementedError
+    ) -> DiseaseScan:
+        scan = DiseaseScan(
+            user_id=user_id,
+            field_id=field_id,
+            disease_name=disease_name,
+            confidence=confidence,
+            severity=severity,
+            plant_name=plant_name,
+            is_healthy=is_healthy,
+            guidance=guidance,
+            scanned_at=datetime.now(tz=timezone.utc),
+        )
+        return await self._repo.save_scan(scan)
 
-    async def get_history(self, farm_id: uuid.UUID) -> list[dict]:
-        raise NotImplementedError
+    async def get_history(self, user_id: uuid.UUID) -> list[DiseaseScan]:
+        return await self._repo.list_by_user(user_id)
 
-    async def get_scan_detail(self, scan_id: uuid.UUID) -> dict:
-        raise NotImplementedError
+    async def get_scan_detail(self, scan_id: uuid.UUID) -> DiseaseScan | None:
+        return await self._repo.get_scan(scan_id)

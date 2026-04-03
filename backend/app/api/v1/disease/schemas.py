@@ -6,16 +6,24 @@ from pydantic import BaseModel
 
 
 class ScanCreate(BaseModel):
+    disease_name: str
+    confidence: float
+    severity: str
+    plant_name: str
+    is_healthy: bool
+    guidance: str | None = None
     field_id: str | None = None
-    notes: str | None = None
 
 
 class ScanResult(BaseModel):
     id: str
+    user_id: str
     field_id: str | None
     disease_name: str | None
     confidence: float | None
     severity: str | None
+    plant_name: str | None
+    is_healthy: bool
     guidance: str | None
     scanned_at: datetime
 

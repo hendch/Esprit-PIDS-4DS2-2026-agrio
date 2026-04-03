@@ -1,0 +1,8 @@
+# Root-level generated artifacts (frontend commands should run inside ./frontend)
+.expo/
+android/
+ios/
+node_modules/
+
+# Common local files
+*.log

@@ -14,6 +14,7 @@ import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useUserStore } from "../../core/userStore/userStore";
 import { useThemeStore } from "../../core/theme/themeStore";
 import { useTheme } from "../../core/theme/useTheme";
+import { useLanguageStore } from "../../core/language/languageStore";
 import { Routes } from "../../core/navigation/routes";
 import { GREEN } from "../../core/theme/themeColors";
 
@@ -39,6 +40,8 @@ export function AppDrawer() {
   const clearUser = useUserStore((s) => s.clearUser);
   const isDark = useThemeStore((s) => s.isDark);
   const toggleDark = useThemeStore((s) => s.toggleDark);
+  const language = useLanguageStore((s) => s.language);
+  const toggleLanguage = useLanguageStore((s) => s.toggleLanguage);
 
   const slideAnim = React.useRef(new Animated.Value(-DRAWER_WIDTH)).current;
   const overlayOpacity = React.useRef(new Animated.Value(0)).current;
@@ -137,6 +140,18 @@ export function AppDrawer() {
               onValueChange={toggleDark}
               trackColor={{ false: "#767577", true: colors.primaryLight }}
               thumbColor={isDark ? colors.primary : "#f4f3f4"}
+            />
+          </View>
+          <View style={[styles.menuItem, styles.darkModeRow, { borderBottomColor: colors.cardBorder }]}>
+            <Text style={styles.menuIcon}>🌐</Text>
+            <Text style={[styles.menuLabel, { color: colors.text }]}>
+              {language === "en" ? "العربية" : "English"}
+            </Text>
+            <Switch
+              value={language === "ar"}
+              onValueChange={toggleLanguage}
+              trackColor={{ false: "#767577", true: colors.primaryLight }}
+              thumbColor={language === "ar" ? colors.primary : "#f4f3f4"}
             />
           </View>
         </View>
