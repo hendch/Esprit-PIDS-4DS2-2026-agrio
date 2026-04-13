@@ -20,7 +20,13 @@ import { useTheme } from "../../core/theme/useTheme";
 import { useLanguage } from "../../core/language/useLanguage";
 import { diagnoseImage, loadModel, DiagnosisResult } from "./diseaseDetectionService";
 import { DISEASE_DATA, SCREEN_LABELS } from "./diseaseAdviceData";
-import { saveScan, fetchScanHistory, ScanResultDTO } from "./diseaseApi";
+import {
+  saveScan,
+  fetchScanHistory,
+  ScanResultDTO,
+  requestSegmentation,
+  SegmentationResultDTO,
+} from "./diseaseApi";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
@@ -88,6 +94,9 @@ export function DiseaseDetectionScreen() {
   const [modelReady, setModelReady] = useState(false);
   const [lastResult, setLastResult] = useState<DiagnosisResult | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
+  const [segResult, setSegResult] = useState<SegmentationResultDTO | null>(null);
+  const [segLoading, setSegLoading] = useState(false);
+  const [segError, setSegError] = useState(false);
 
   // Preload model on mount
   useEffect(() => {
@@ -119,6 +128,8 @@ export function DiseaseDetectionScreen() {
   const runDiagnosis = async (imageUri: string) => {
     setIsLoading(true);
     setLastImageUri(imageUri);
+    setSegResult(null);
+    setSegError(false);
     try {
       const result = await diagnoseImage(imageUri);
       setLastResult(result);
@@ -159,6 +170,16 @@ export function DiseaseDetectionScreen() {
       };
 
       setHistory((prev) => [entry, ...prev]);
+
+      // Fire segmentation request to backend (non-blocking for classification)
+      setSegLoading(true);
+      requestSegmentation(imageUri)
+        .then((seg) => setSegResult(seg))
+        .catch((err) => {
+          console.warn("Segmentation failed:", err);
+          setSegError(true);
+        })
+        .finally(() => setSegLoading(false));
     } catch (err: any) {
       Alert.alert("Diagnosis Failed", err.message || "Something went wrong.");
     } finally {
@@ -292,7 +313,19 @@ export function DiseaseDetectionScreen() {
           return (
             <>
               <View style={styles.resultCard}>
-                <Image source={{ uri: lastImageUri }} style={styles.resultImage} />
+                {segResult ? (
+                  <Image
+                    source={{ uri: `data:image/jpeg;base64,${segResult.annotated_image}` }}
+                    style={styles.resultImage}
+                  />
+                ) : (
+                  <Image source={{ uri: lastImageUri }} style={styles.resultImage} />
+                )}
+                {segLoading && (
+                  <View style={styles.segLoadingOverlay}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                  </View>
+                )}
                 <View style={styles.resultBody}>
                   <Text style={[styles.resultTitle, isRTL && styles.rtlText]}>{displayName}</Text>
                   <Text style={[styles.resultConfidence, isRTL && styles.rtlText]}>
@@ -330,6 +363,32 @@ export function DiseaseDetectionScreen() {
                   <Text style={[styles.adviceText, isRTL && styles.rtlText]}>{advice}</Text>
                 </View>
               ) : null}
+
+              {/* Segmentation regions list (below advice) */}
+              {segResult && !segLoading && (
+                <View style={styles.segCard}>
+                  <View style={styles.segBody}>
+                    <Text style={[styles.segTitle, isRTL && styles.rtlText]}>
+                      {segResult.total_regions} {labels.regionsDetected}
+                    </Text>
+                    {segResult.regions.map((region, idx) => (
+                      <View key={idx} style={styles.segRegionRow}>
+                        <Text style={[styles.segRegionName, isRTL && styles.rtlText]}>
+                          {region.class_name}
+                        </Text>
+                        <Text style={styles.segRegionConf}>{region.confidence}%</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
+              {segError && !segLoading && (
+                <View style={styles.segErrorCard}>
+                  <Text style={[styles.segErrorText, isRTL && styles.rtlText]}>
+                    {labels.segmentationFailed}
+                  </Text>
+                </View>
+              )}
             </>
           );
         })()}
@@ -453,6 +512,14 @@ const styles = StyleSheet.create({
     height: 200,
     resizeMode: "cover",
   },
+  segLoadingOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 16,
+    padding: 6,
+  },
   resultBody: { padding: 16 },
   resultTitle: { fontSize: 20, fontWeight: "700", color: "#2C2C2C", marginBottom: 8 },
   resultConfidence: { fontSize: 16, color: "#555", marginBottom: 4 },
@@ -560,4 +627,39 @@ const styles = StyleSheet.create({
     color: "#444",
     lineHeight: 24,
   },
+  segCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    overflow: "hidden",
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#90CAF9",
+  },
+  segBody: { padding: 16 },
+  segTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#2C2C2C",
+    marginBottom: 10,
+  },
+  segRegionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  segRegionName: { fontSize: 14, color: "#444", flex: 1 },
+  segRegionConf: { fontSize: 14, fontWeight: "600", color: GREEN },
+  segErrorCard: {
+    backgroundColor: "#FFF3E0",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#FFCC80",
+    alignItems: "center",
+  },
+  segErrorText: { fontSize: 14, color: "#E65100" },
 });

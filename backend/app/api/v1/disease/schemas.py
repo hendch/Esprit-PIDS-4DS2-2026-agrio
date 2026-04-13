@@ -30,3 +30,18 @@ class ScanResult(BaseModel):
 
 class ScanHistoryResponse(BaseModel):
     scans: list[ScanResult]
+
+
+# ── Segmentation ──────────────────────────────────────────────
+
+
+class SegmentationRegion(BaseModel):
+    class_name: str
+    confidence: float
+    bbox: list[float]
+
+
+class SegmentationResponse(BaseModel):
+    annotated_image: str  # base64 JPEG
+    regions: list[SegmentationRegion]
+    total_regions: int

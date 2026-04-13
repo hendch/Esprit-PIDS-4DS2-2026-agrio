@@ -86,6 +86,7 @@ Edit `backend.env` and fill in:
 | `AGRIO_DEBUG` | No | `true` for dev |
 | `AGRIO_CORS_ORIGINS` | No | Uncomment if testing from web browser |
 | `AGRIO_MQTT_*` | No | Defaults work with the Wokwi ESP32 simulator |
+| `AGRIO_SEGMENTATION_MODEL_PATH` | No | Absolute path to your YOLOv8 segmentation `best.pt` file. Required only for leaf segmentation |
 
 > **IMPORTANT:** Never commit `backend.env`. Only `backend/.env.example` is shared.
 
@@ -198,7 +199,7 @@ The simulation runs **locally inside VS Code** using the Wokwi extension (free, 
 - **Sign Up** with an email and password
 - **Log In** to reach the Dashboard
 - **Water tab** (Irrigation): Press "Evaluate Field Now" to trigger the AI agent. It reads MQTT sensor data + weather forecast and decides whether to irrigate. Check the Wokwi Serial Monitor for `Pump ON` / `Pump OFF`.
-- **Crop tab** (Disease Detection): Take or pick a photo of a plant leaf to get disease diagnosis and treatment advice
+- **Crop tab** (Disease Detection): Take or pick a photo of a plant leaf to get disease diagnosis and treatment advice. The on-device TFLite model classifies the disease instantly, while the backend YOLOv8 model provides leaf segmentation with annotated regions
 - **Autonomous Control toggle**: When enabled, the backend automatically checks irrigation every 6 hours
 
 ---
@@ -210,7 +211,7 @@ The simulation runs **locally inside VS Code** using the Wokwi extension (free, 
 | User Auth | Login, Sign Up | `/api/v1/auth/` |
 | Dashboard | Home tab | - |
 | Irrigation | Water tab | `/api/v1/irrigation/` |
-| Disease Detection | Crop tab | On-device TFLite model |
+| Disease Detection | Crop tab | On-device TFLite classification + online YOLOv8 segmentation (`/api/v1/disease/segment`) |
 | Satellite/Land | Land tab | `/api/v1/satellite/` |
 | Livestock | Livestock tab | `/api/v1/livestock/` |
 | Community | Community tab | - |
@@ -225,7 +226,7 @@ backend/
   app/
     api/v1/          # Route handlers (auth, irrigation, disease, etc.)
     middleware/       # Auth JWT middleware, CORS, logging
-    modules/          # Business logic (auth, irrigation, ai, iot_gateway, etc.)
+    modules/          # Business logic (auth, irrigation, ai, iot_gateway, disease segmentation, etc.)
     persistence/      # Database engine, base model, session
     settings.py       # Pydantic settings (reads from backend.env / .env)
   docker-compose.yml  # PostgreSQL container
@@ -239,6 +240,52 @@ frontend/
     bootstrap/        # App initialization, feature registration
   assets/model/       # TFLite model for disease detection
 ```
+
+---
+
+## 6) Leaf Segmentation (YOLOv8 — Online via Backend)
+
+The disease detection feature has two models:
+
+| Model | Where it runs | Purpose |
+|---|---|---|
+| EfficientNet TFLite | On-device (offline) | Classifies disease from 31 PlantVillage classes |
+| YOLOv8s-seg (`best.pt`) | Backend server (online) | Segments leaf regions with masks and bounding boxes |
+
+### 6.1) Setup
+
+1. Train or obtain the YOLOv8 segmentation model (`best.pt`) — trained on the PlantSeg v2 dataset
+2. Place the weights file somewhere on the backend machine, e.g.:
+   ```
+   C:/Users/ASUS F15/Desktop/A/PROJECT/MODELS/segmintation/best.pt
+   ```
+3. Set the path in `backend/.env`:
+   ```
+   AGRIO_SEGMENTATION_MODEL_PATH=C:/Users/ASUS F15/Desktop/A/PROJECT/MODELS/segmintation/best.pt
+   ```
+4. Install dependencies (includes `ultralytics`):
+   ```bash
+   cd backend
+   .venv\Scripts\activate
+   pip install -e ".[dev]"
+   ```
+5. Restart the backend:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+### 6.2) How it works
+
+- The app takes a photo → the TFLite classification result appears **instantly** (offline)
+- In parallel, the image is uploaded to `POST /api/v1/disease/segment` for segmentation
+- The backend loads the YOLOv8 model on first request (lazy loading) and returns:
+  - An annotated image (base64 JPEG with masks overlaid)
+  - A list of detected regions with class name, confidence, and bounding box
+- The segmentation result appears in the app below the classification card
+
+### 6.3) Test the endpoint
+
+Once the backend is running, open `http://localhost:8000/docs`, find `POST /api/v1/disease/segment`, and upload a leaf image to verify the model loads and returns results.
 
 ---
 
@@ -291,6 +338,9 @@ Remove-Item -LiteralPath node_modules -Recurse -Force
 npm install
 ```
 
+### Segmentation returns 503 "model not configured"
+Set `AGRIO_SEGMENTATION_MODEL_PATH` in `backend/.env` to the absolute path of your `best.pt` file. Make sure the file exists and restart uvicorn.
+
 ### Docker Postgres port conflict
 If port 5432 is already in use, stop the other Postgres or change the port in `docker-compose.yml`.
 
@@ -307,7 +357,8 @@ cd Esprit-PIDS-4DS2-2026-agrio
 cd backend
 docker compose up -d
 cp .env.example backend.env
-# Edit backend.env: set AGRIO_JWT_SECRET and AGRIO_GROQ_API_KEY
+# Edit backend.env: set AGRIO_JWT_SECRET, AGRIO_GROQ_API_KEY
+# Optional: set AGRIO_SEGMENTATION_MODEL_PATH for leaf segmentation
 python -m venv .venv
 .venv\Scripts\activate        # Windows
 pip install -e ".[dev]"

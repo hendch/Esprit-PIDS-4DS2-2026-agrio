@@ -402,6 +402,10 @@ export const SCREEN_LABELS = {
     tip4: "Clean the lens before capture",
     treatmentAdvice: "Treatment Advice",
     healthyAdvice: "Plant Care Tips",
+    segmentation: "Segmentation Analysis",
+    segmentingLeaf: "Running segmentation...",
+    segmentationFailed: "Segmentation unavailable",
+    regionsDetected: "regions detected",
   },
   ar: {
     cropHealth: "صحة المحاصيل",
@@ -425,5 +429,9 @@ export const SCREEN_LABELS = {
     tip4: "نظّف العدسة قبل التصوير",
     treatmentAdvice: "نصائح العلاج",
     healthyAdvice: "نصائح العناية بالنبات",
+    segmentation: "تحليل التجزئة",
+    segmentingLeaf: "جاري تحليل التجزئة...",
+    segmentationFailed: "التجزئة غير متاحة",
+    regionsDetected: "مناطق مكتشفة",
   },
 };

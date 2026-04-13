@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user
 from app.modules.disease.repository import DiseaseRepository
+from app.modules.disease.segmentation_service import run_segmentation
 from app.modules.disease.service import DiseaseService
 from app.persistence.db import get_async_session
 
-from .schemas import ScanCreate, ScanHistoryResponse, ScanResult
+from .schemas import ScanCreate, ScanHistoryResponse, ScanResult, SegmentationResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -80,3 +85,31 @@ async def get_scan(
     if scan is None or str(scan.user_id) != user["user_id"]:
         raise HTTPException(status_code=404, detail="Scan not found")
     return _scan_to_result(scan)
+
+
+# ── Segmentation (online, YOLOv8) ────────────────────────────
+
+MAX_IMAGE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+@router.post("/segment", response_model=SegmentationResponse)
+async def segment_image(
+    image: UploadFile = File(...),
+    user: dict = Depends(get_current_user),
+) -> SegmentationResponse:
+    """Upload a leaf image and receive segmentation masks from the YOLOv8 model."""
+    if image.content_type and not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image")
+
+    image_bytes = await image.read()
+    if len(image_bytes) > MAX_IMAGE_SIZE:
+        raise HTTPException(status_code=400, detail="Image exceeds 10 MB limit")
+
+    try:
+        # Run inference in a thread to avoid blocking the async event loop
+        result = await asyncio.to_thread(run_segmentation, image_bytes)
+    except (RuntimeError, FileNotFoundError) as exc:
+        logger.error("Segmentation failed: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    return SegmentationResponse(**result)

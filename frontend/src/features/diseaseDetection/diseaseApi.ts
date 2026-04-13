@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 import { httpClient } from "../../core/api/httpClient";
 
 export type ScanResultDTO = {
@@ -35,5 +37,44 @@ export async function fetchScanHistory(): Promise<ScanResultDTO[]> {
 
 export async function fetchScanDetail(scanId: string): Promise<ScanResultDTO> {
   const { data } = await httpClient.get<ScanResultDTO>(`/api/v1/disease/scan/${scanId}`);
+  return data;
+}
+
+// ── Segmentation (online) ────────────────────────────────────
+
+export type SegmentationRegion = {
+  class_name: string;
+  confidence: number;
+  bbox: number[];
+};
+
+export type SegmentationResultDTO = {
+  annotated_image: string; // base64 JPEG
+  regions: SegmentationRegion[];
+  total_regions: number;
+};
+
+/**
+ * Send an image to the backend for YOLOv8 segmentation.
+ * Returns annotated image (base64) + detected regions.
+ */
+export async function requestSegmentation(imageUri: string): Promise<SegmentationResultDTO> {
+  const formData = new FormData();
+
+  const fileName = imageUri.split("/").pop() ?? "photo.jpg";
+  formData.append("image", {
+    uri: Platform.OS === "android" ? imageUri : imageUri.replace("file://", ""),
+    name: fileName,
+    type: "image/jpeg",
+  } as any);
+
+  const { data } = await httpClient.post<SegmentationResultDTO>(
+    "/api/v1/disease/segment",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 60_000, // segmentation can take a few seconds
+    },
+  );
   return data;
 }

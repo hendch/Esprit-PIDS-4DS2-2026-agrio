@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     disease_model_url: str = ""
     disease_model_api_key: str = ""
 
+    # YOLOv8 segmentation model (.pt file path)
+    segmentation_model_path: str = ""
+
     # Email (SMTP)
     smtp_host: str = ""
     smtp_port: int = 587
