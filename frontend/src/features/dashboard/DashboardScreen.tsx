@@ -134,6 +134,15 @@ export function DashboardScreen() {
                 onPress={() => nav.navigate(Routes.Livestock)}
               />
             </View>
+            <View style={{ width: cardWidth }}>
+              <HomePageCard
+                icon="📈"
+                title="Market Prices"
+                subtitle="Price forecasts & trends"
+                backgroundColor={BLUE_LIGHT}
+                onPress={() => nav.navigate(Routes.MarketPrices)}
+              />
+            </View>
           </View>
         </View>
 

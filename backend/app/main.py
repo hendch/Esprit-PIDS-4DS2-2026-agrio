@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -7,12 +9,31 @@ from fastapi import FastAPI
 
 from app.settings import settings
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from app.modules.irrigation.repository import IrrigationRepository
 
     IrrigationRepository().init_db()
+
+    if settings.market_retrain_on_startup:
+        from app.modules.market_prices.pipeline import ForecastPipeline
+        from app.modules.market_prices.data.loader import ALL_SERIES
+
+        async def _retrain_all() -> None:
+            pipeline = ForecastPipeline()
+            for series_name in ALL_SERIES:
+                try:
+                    pipeline.run(series_name=series_name, horizon=12, model="auto")
+                    logger.info("market retrain OK: %s", series_name)
+                except Exception as exc:
+                    logger.warning("market retrain SKIP %s: %s", series_name, exc)
+
+        asyncio.create_task(_retrain_all())
+        logger.info("Market price forecast pipeline started in background")
+
     yield
 
 
@@ -46,6 +67,7 @@ def _register_routers(application: FastAPI) -> None:
     from app.api.v1.irrigation.routes import router as irrigation_router
     from app.api.v1.ledger.routes import router as ledger_router
     from app.api.v1.livestock.routes import router as livestock_router
+    from app.api.v1.market_prices.routes import router as market_prices_router
     from app.api.v1.satellite.routes import router as satellite_router
 
     application.include_router(health_router, tags=["health"])
@@ -68,6 +90,11 @@ def _register_routers(application: FastAPI) -> None:
     )
     application.include_router(ai_router, prefix=f"{prefix}/ai", tags=["ai"])
     application.include_router(ledger_router, prefix=f"{prefix}/ledger", tags=["ledger"])
+    application.include_router(
+        market_prices_router,
+        prefix=f"{prefix}/market-prices",
+        tags=["market_prices"],
+    )
 
 
 app = create_app()

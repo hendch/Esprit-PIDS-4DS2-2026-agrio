@@ -1,3 +1,6 @@
 .env
 agrio_backend.egg-info
 __pycache__
+data/market_prices/cache/
+data/market_prices/raw/*.xls
+data/market_prices/raw/*.xlsx

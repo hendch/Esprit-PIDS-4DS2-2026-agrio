@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     open_meteo_base_url: str = "https://api.open-meteo.com"
     media_root: str = "./media"
+    market_data_dir: str = "./data/market_prices/raw"
+    market_forecast_cache_dir: str = "./data/market_prices/cache"
+    market_retrain_on_startup: bool = False
 
     model_config = {"env_prefix": "AGRIO_", "env_file": ".env"}
 

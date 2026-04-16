@@ -9,6 +9,7 @@ export const Routes = {
     Community: "Community",
     Alerts: "Alerts",
     FarmTrustLedger: "FarmTrustLedger",
+    MarketPrices: "MarketPrices",
   } as const;
   
   export type RouteName = (typeof Routes)[keyof typeof Routes];
