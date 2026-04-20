@@ -25,6 +25,11 @@ dependencies = [
     "paho-mqtt>=2.1.0",
     "requests>=2.32.0",
     "python-dotenv>=1.0.0",
+    "numpy>=1.26.0",
+    "xgboost==3.2.0",
+    "pandas>=2.2.0",
+    
+
 ]
 
 [project.optional-dependencies]

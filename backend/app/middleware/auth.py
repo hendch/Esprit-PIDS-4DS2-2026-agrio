@@ -10,8 +10,10 @@ from starlette.responses import Response
 
 from app.settings import settings
 
-# Only these paths skip JWT. Do not use a broad "/auth/" match — e.g. `/api/v1/auth/me` must verify Bearer.
+# Only these paths skip JWT. Do not use a broad "/auth/" match —
+# e.g. `/api/v1/auth/me` must still verify Bearer.
 _SKIP_PREFIXES = ("/health", "/docs", "/openapi", "/redoc")
+
 _PUBLIC_AUTH_PATHS = frozenset(
     {
         "/api/v1/auth/login",
@@ -20,16 +22,31 @@ _PUBLIC_AUTH_PATHS = frozenset(
     }
 )
 
+# Local-development-only ML bypasses.
+# These are only public when settings.debug is True.
+_PUBLIC_DEBUG_PATHS = frozenset(
+    {
+        "/api/v1/ml/status",
+        "/api/v1/ml/predict-yield",
+    }
+)
+
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         path = request.url.path
-
         normalized = path.rstrip("/") or "/"
+
+        # Public auth endpoints
         if normalized in _PUBLIC_AUTH_PATHS:
             return await call_next(request)
 
+        # Docs / health
         if any(seg in path for seg in _SKIP_PREFIXES):
+            return await call_next(request)
+
+        # Local debug-only public ML endpoints
+        if settings.debug and normalized in _PUBLIC_DEBUG_PATHS:
             return await call_next(request)
 
         auth_header: str | None = request.headers.get("authorization")

@@ -85,6 +85,7 @@ def _register_routers(application: FastAPI) -> None:
     from app.api.v1.ledger.routes import router as ledger_router
     from app.api.v1.livestock.routes import router as livestock_router
     from app.api.v1.satellite.routes import router as satellite_router
+    from app.api.v1.ml_crop.routes import router as ml_crop_router
 
     application.include_router(health_router, tags=["health"])
 
@@ -106,6 +107,8 @@ def _register_routers(application: FastAPI) -> None:
     )
     application.include_router(ai_router, prefix=f"{prefix}/ai", tags=["ai"])
     application.include_router(ledger_router, prefix=f"{prefix}/ledger", tags=["ledger"])
+    
+    application.include_router(ml_crop_router, prefix=f"{prefix}/ml", tags=["ml-crop"])
 
 
 app = create_app()
