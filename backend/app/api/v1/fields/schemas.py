@@ -15,6 +15,8 @@ class FieldCreate(BaseModel):
 class FieldUpdate(BaseModel):
     name: str | None = None
     crop_type: str | None = None
+    area_ha: float | None = None
+    boundary: dict | None = None
 
 
 class FieldResponse(BaseModel):
