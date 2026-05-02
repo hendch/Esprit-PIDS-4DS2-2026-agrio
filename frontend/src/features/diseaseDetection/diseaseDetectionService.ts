@@ -1,4 +1,4 @@
-import { loadTensorflowModel, TensorflowModel } from 'react-native-fast-tflite';
+import type { TensorflowModel } from 'react-native-fast-tflite';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as jpeg from 'jpeg-js';
 import { Buffer } from 'buffer';
@@ -28,6 +28,7 @@ let model: TensorflowModel | null = null;
 
 export async function loadModel(): Promise<void> {
   if (model) return;
+  const { loadTensorflowModel } = await import('react-native-fast-tflite');
   model = await loadTensorflowModel(
     require('../../../assets/model/efficientnet_plantvillage.tflite')
   );
