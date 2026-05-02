@@ -78,3 +78,51 @@ export async function requestSegmentation(imageUri: string): Promise<Segmentatio
   );
   return data;
 }
+
+// ── LLM advice + follow-up chat ─────────────────────────────
+
+export type AdvicePayload = {
+  disease_name: string;
+  plant_name: string;
+  confidence: number;
+  severity: string;
+  is_healthy: boolean;
+  locale: "en" | "ar";
+};
+
+export type AdviceResponseDTO = {
+  advice: string;
+  source: "llm" | "fallback";
+};
+
+export async function requestAdvice(payload: AdvicePayload): Promise<AdviceResponseDTO> {
+  const { data } = await httpClient.post<AdviceResponseDTO>(
+    "/api/v1/disease/advice",
+    payload,
+    { timeout: 30_000 },
+  );
+  return data;
+}
+
+export type ChatTurnDTO = { role: "user" | "assistant"; content: string };
+
+export type ChatRequestPayload = {
+  message: string;
+  history: ChatTurnDTO[];
+  locale: "en" | "ar";
+  original_advice?: string;
+};
+
+export type ChatResponseDTO = { reply: string };
+
+export async function sendChatMessage(
+  scanId: string,
+  payload: ChatRequestPayload,
+): Promise<ChatResponseDTO> {
+  const { data } = await httpClient.post<ChatResponseDTO>(
+    `/api/v1/disease/scan/${scanId}/chat`,
+    payload,
+    { timeout: 30_000 },
+  );
+  return data;
+}

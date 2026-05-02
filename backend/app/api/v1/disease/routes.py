@@ -8,12 +8,27 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user
+from app.modules.disease.advisor import (
+    ChatTurn as AdvisorTurn,
+    DiagnosisContext,
+    chat_reply,
+    generate_advice,
+)
 from app.modules.disease.repository import DiseaseRepository
 from app.modules.disease.segmentation_service import run_segmentation
 from app.modules.disease.service import DiseaseService
 from app.persistence.db import get_async_session
 
-from .schemas import ScanCreate, ScanHistoryResponse, ScanResult, SegmentationResponse
+from .schemas import (
+    AdviceRequest,
+    AdviceResponse,
+    ChatRequest,
+    ChatResponse,
+    ScanCreate,
+    ScanHistoryResponse,
+    ScanResult,
+    SegmentationResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -113,3 +128,64 @@ async def segment_image(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     return SegmentationResponse(**result)
+
+
+# ── LLM advice + chat ────────────────────────────────────────
+
+
+@router.post("/advice", response_model=AdviceResponse)
+async def get_advice(
+    body: AdviceRequest,
+    user: dict = Depends(get_current_user),
+) -> AdviceResponse:
+    """Generate dynamic advice for a diagnosis. Falls back signal returned to client."""
+    ctx = DiagnosisContext(
+        disease_name=body.disease_name,
+        plant_name=body.plant_name,
+        confidence=body.confidence,
+        severity=body.severity,
+        is_healthy=body.is_healthy,
+        locale=body.locale,
+    )
+    advice = await generate_advice(ctx)
+    if advice is None:
+        # Client already has the static dict — tell it to use the local fallback.
+        return AdviceResponse(advice="", source="fallback")
+    return AdviceResponse(advice=advice, source="llm")
+
+
+@router.post("/scan/{scan_id}/chat", response_model=ChatResponse)
+async def chat_about_scan(
+    scan_id: str,
+    body: ChatRequest,
+    user: dict = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+) -> ChatResponse:
+    """Follow-up Q&A about a specific scan. The scan is loaded from DB to anchor context."""
+    repo = DiseaseRepository(session)
+    service = DiseaseService(repo)
+    scan = await service.get_scan_detail(uuid.UUID(scan_id))
+    if scan is None or str(scan.user_id) != user["user_id"]:
+        raise HTTPException(status_code=404, detail="Scan not found")
+
+    ctx = DiagnosisContext(
+        disease_name=scan.disease_name or "Unknown",
+        plant_name=scan.plant_name or "plant",
+        confidence=float(scan.confidence or 0),
+        severity=scan.severity or "Low",
+        is_healthy=bool(scan.is_healthy),
+        locale=body.locale,
+    )
+    history = [AdvisorTurn(role=t.role, content=t.content) for t in body.history]
+    reply = await chat_reply(
+        ctx=ctx,
+        history=history,
+        user_message=body.message,
+        original_advice=body.original_advice or scan.guidance,
+    )
+    if reply is None:
+        raise HTTPException(
+            status_code=503,
+            detail="AI advisor unavailable. Try again in a moment.",
+        )
+    return ChatResponse(reply=reply)

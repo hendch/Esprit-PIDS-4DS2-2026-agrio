@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     groq_api_key: str = ""
     groq_model: str = "llama-3.3-70b-versatile"
+    # Optional: separate Groq key for the disease advisor. Falls back to groq_api_key if unset.
+    groq_disease_api_key: str = ""
 
     mqtt_broker_host: str = "broker.hivemq.com"
     mqtt_broker_port: int = 1883
