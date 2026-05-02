@@ -178,6 +178,7 @@ export function LandScreen() {
                   <Text style={styles.fieldSummarySubtitle}>{field.crop}</Text>
                   <View style={styles.fieldSummaryMetaRow}>
                     <Text style={styles.fieldSummaryMeta}>{field.areaHa} ha</Text>
+                    <Text style={styles.fieldSummaryMeta}>{field.growthStage}</Text>
                     <Text style={styles.fieldSummaryMeta}>{field.points.length} boundary points</Text>
                   </View>
                 </View>
@@ -221,6 +222,9 @@ export function LandScreen() {
                   <Text style={styles.calendarTitle}>AI Crop Calendar</Text>
                 </View>
                 <Text style={styles.calendarLine}>Planted: {field.planted}</Text>
+                <Text style={styles.calendarLine}>Growth stage: {field.growthStage}</Text>
+                <Text style={styles.calendarLine}>Field type: {field.fieldType}</Text>
+                <Text style={styles.calendarLine}>Varieties: {field.varieties}</Text>
                 <Text style={styles.calendarLine}>Est. Harvest: {field.estHarvest}</Text>
               </View>
             </Pressable>

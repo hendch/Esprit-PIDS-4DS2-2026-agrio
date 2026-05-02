@@ -1,5 +1,10 @@
 import { httpClient } from "../../core/api/httpClient";
-import { cropLabel } from "./cropOptions";
+import {
+  cropCategoryLabel,
+  cropLabel,
+  fieldTypeLabel,
+  growthStageFromPlantingDate,
+} from "./cropOptions";
 
 export type BoundaryPoint = {
   latitude: number;
@@ -9,6 +14,10 @@ export type BoundaryPoint = {
 export type FieldBoundaryPayload = {
   name: string;
   cropType?: string;
+  plantingDate?: string;
+  fieldType?: string;
+  cropCategories?: string[];
+  varieties?: string[];
   areaHa?: number;
   points: BoundaryPoint[];
 };
@@ -17,6 +26,10 @@ export type FieldBoundaryRecord = {
   id: string;
   name: string;
   cropType?: string;
+  plantingDate?: string;
+  fieldType?: string;
+  cropCategories: string[];
+  varieties: string[];
   areaHa?: number;
   createdAt: string;
   points: BoundaryPoint[];
@@ -27,11 +40,21 @@ type FieldApiResponse = {
   farm_id: string;
   name: string;
   crop_type: string | null;
+  planting_date: string | null;
+  field_type: string | null;
+  crop_categories: string[] | null;
+  varieties: string[] | null;
   area_ha: number | null;
   created_at: string;
   boundary: {
     type: "Polygon";
     coordinates: number[][][];
+    properties?: {
+      planting_date?: string | null;
+      field_type?: string | null;
+      crop_categories?: string[] | null;
+      varieties?: string[] | null;
+    };
   };
 };
 
@@ -48,11 +71,16 @@ export type FieldDisplayItem = {
   healthScore: number;
   planted: string;
   estHarvest: string;
+  growthStage: string;
+  fieldType: string;
+  cropCategories: string;
+  varieties: string;
   imageTint: string;
   points: BoundaryPoint[];
 };
 
-function toGeoJsonPolygon(points: BoundaryPoint[]) {
+function toGeoJsonPolygon(payload: FieldBoundaryPayload) {
+  const { points } = payload;
   const ring = points.map((point) => [point.longitude, point.latitude]);
   const first = ring[0];
   const last = ring[ring.length - 1];
@@ -62,6 +90,12 @@ function toGeoJsonPolygon(points: BoundaryPoint[]) {
   return {
     type: "Polygon" as const,
     coordinates: [closedRing],
+    properties: {
+      planting_date: payload.plantingDate ?? null,
+      field_type: payload.fieldType ?? null,
+      crop_categories: payload.cropCategories ?? [],
+      varieties: payload.varieties ?? [],
+    },
   };
 }
 
@@ -78,10 +112,15 @@ function fromGeoJsonPolygon(boundary: FieldApiResponse["boundary"]): BoundaryPoi
 }
 
 function toFieldBoundaryRecord(data: FieldApiResponse): FieldBoundaryRecord {
+  const properties = data.boundary.properties ?? {};
   return {
     id: data.id,
     name: data.name,
     cropType: data.crop_type ?? undefined,
+    plantingDate: data.planting_date ?? properties.planting_date ?? undefined,
+    fieldType: data.field_type ?? properties.field_type ?? undefined,
+    cropCategories: data.crop_categories ?? properties.crop_categories ?? [],
+    varieties: data.varieties ?? properties.varieties ?? [],
     areaHa: data.area_ha ?? undefined,
     createdAt: data.created_at,
     points: fromGeoJsonPolygon(data.boundary),
@@ -112,6 +151,8 @@ function colorForIndex(index: number): string {
 
 export function toFieldDisplayItem(record: FieldBoundaryRecord, index = 0): FieldDisplayItem {
   const crop = cropLabel(record.cropType);
+  const plantedSource = record.plantingDate ?? record.createdAt;
+  const categories = record.cropCategories.map(cropCategoryLabel);
   return {
     id: record.id,
     name: record.name,
@@ -121,8 +162,12 @@ export function toFieldDisplayItem(record: FieldBoundaryRecord, index = 0): Fiel
     soilFertility: "Medium",
     areaHa: Number((record.areaHa ?? 0).toFixed(2)),
     healthScore: 86,
-    planted: formatDate(record.createdAt),
-    estHarvest: estimateHarvestDate(record.createdAt),
+    planted: formatDate(plantedSource),
+    estHarvest: estimateHarvestDate(plantedSource),
+    growthStage: growthStageFromPlantingDate(record.plantingDate),
+    fieldType: fieldTypeLabel(record.fieldType),
+    cropCategories: categories.length > 0 ? categories.join(", ") : "Not set",
+    varieties: record.varieties.length > 0 ? record.varieties.join(", ") : "Not set",
     imageTint: colorForIndex(index),
     points: record.points,
   };
@@ -142,8 +187,12 @@ export async function saveFieldBoundary(payload: FieldBoundaryPayload): Promise<
   const { data } = await httpClient.post<FieldApiResponse>("/api/v1/fields/", {
     name: payload.name,
     crop_type: payload.cropType ?? null,
+    planting_date: payload.plantingDate ?? null,
+    field_type: payload.fieldType ?? null,
+    crop_categories: payload.cropCategories ?? [],
+    varieties: payload.varieties ?? [],
     area_ha: payload.areaHa ?? null,
-    boundary: toGeoJsonPolygon(payload.points),
+    boundary: toGeoJsonPolygon(payload),
   });
 
   return toFieldBoundaryRecord(data);

@@ -235,6 +235,10 @@ export function FieldDetailScreen() {
             <Text style={styles.calendarTitle}>AI Crop Calendar</Text>
           </View>
           <Text style={styles.calendarLine}>Planted: {field.planted}</Text>
+          <Text style={styles.calendarLine}>Growth stage: {field.growthStage}</Text>
+          <Text style={styles.calendarLine}>Field type: {field.fieldType}</Text>
+          <Text style={styles.calendarLine}>Categories: {field.cropCategories}</Text>
+          <Text style={styles.calendarLine}>Varieties: {field.varieties}</Text>
           <Text style={styles.calendarLine}>Est. Harvest: {field.estHarvest}</Text>
           <Pressable
             style={[styles.fertilizerBtn, isCheckingFertilizer && styles.fertilizerBtnDisabled]}
