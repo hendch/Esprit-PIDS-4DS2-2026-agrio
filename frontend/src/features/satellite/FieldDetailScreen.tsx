@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -12,52 +12,18 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Routes } from "../../core/navigation/routes";
 import { useTheme } from "../../core/theme/useTheme";
+import {
+  FieldDisplayItem,
+  FieldStatus,
+  getFieldBoundary,
+  toFieldDisplayItem,
+} from "./fieldBoundaryService";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
 const GREEN_LIGHT = "#E8F5E9";
 
-
-const MOCK_FIELDS: Record<string, { name: string; crop: string; status: string; ndvi: number; soilFertility: string; areaHa: number; healthScore: number; planted: string; estHarvest: string; imageTint: string }> = {
-  A1: {
-    name: "Field A1",
-    crop: "Corn",
-    status: "Good",
-    ndvi: 0.78,
-    soilFertility: "High",
-    areaHa: 12.4,
-    healthScore: 92,
-    planted: "Mar 15, 2026",
-    estHarvest: "Aug 20, 2026",
-    imageTint: "#81C784",
-  },
-  A2: {
-    name: "Field A2",
-    crop: "Wheat",
-    status: "Warning",
-    ndvi: 0.62,
-    soilFertility: "Medium",
-    areaHa: 9.8,
-    healthScore: 78,
-    planted: "Mar 10, 2026",
-    estHarvest: "Jul 15, 2026",
-    imageTint: "#DCE775",
-  },
-  B2: {
-    name: "Field B2",
-    crop: "Corn",
-    status: "Poor",
-    ndvi: 0.48,
-    soilFertility: "Low",
-    areaHa: 11.6,
-    healthScore: 65,
-    planted: "Mar 18, 2026",
-    estHarvest: "Aug 25, 2026",
-    imageTint: "#A1887F",
-  },
-};
-
-function statusColor(s: string): string {
+function statusColor(s: FieldStatus): string {
   if (s === "Good") return "#4CAF50";
   if (s === "Warning") return "#FF9800";
   return "#E53935";
@@ -95,10 +61,46 @@ export function FieldDetailScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const params = route.params as { fieldId?: string } | undefined;
-  const fieldId = params?.fieldId ?? "B2";
-  const field = MOCK_FIELDS[fieldId] ?? MOCK_FIELDS.B2;
+  const fieldId = params?.fieldId;
   const { colors } = useTheme();
   const imageHeight = width * 0.45;
+  const [field, setField] = useState<FieldDisplayItem | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadField() {
+      if (!fieldId) {
+        setLoadError("Field not found.");
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        setIsLoading(true);
+        setLoadError(null);
+        const record = await getFieldBoundary(fieldId);
+        if (isMounted) {
+          setField(toFieldDisplayItem(record));
+        }
+      } catch {
+        if (isMounted) {
+          setLoadError("Could not load this field.");
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    }
+
+    void loadField();
+    return () => {
+      isMounted = false;
+    };
+  }, [fieldId]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -118,7 +120,10 @@ export function FieldDetailScreen() {
         contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + 80 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* Field image */}
+        {isLoading ? <Text style={styles.stateText}>Loading field...</Text> : null}
+        {!isLoading && loadError ? <Text style={styles.stateText}>{loadError}</Text> : null}
+        {!isLoading && !loadError && field ? (
+          <>
         <View style={[styles.fieldImage, { height: imageHeight, backgroundColor: field.imageTint }]}>
           <View style={styles.fieldImageTags}>
             <View style={styles.tagGreen}>
@@ -203,6 +208,8 @@ export function FieldDetailScreen() {
             <Text style={styles.vraNext}>Next application scheduled: Feb 15, 2026</Text>
           </View>
         </View>
+          </>
+        ) : null}
       </ScrollView>
 
       <TabBar active="Land" />
@@ -229,6 +236,7 @@ const styles = StyleSheet.create({
   headerRight: { fontSize: 14, color: "#666", fontWeight: "500" },
   scroll: { flex: 1 },
   scrollContent: { paddingBottom: 24 },
+  stateText: { padding: 24, fontSize: 14, color: "#666" },
   fieldImage: { width: "100%", position: "relative" },
   fieldImageTags: {
     position: "absolute",
