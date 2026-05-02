@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.middleware.auth import get_current_user
 
 from app.modules.irrigation.repository import IrrigationRepository
 from app.modules.iot_gateway.mqtt_client import MqttSensorProvider
@@ -124,6 +125,7 @@ async def get_dashboard_data(session: AsyncSession = Depends(get_async_session))
 async def create_schedule(
     data: ScheduleRequest,
     session: AsyncSession = Depends(get_async_session),
+    current_user: dict = Depends(get_current_user),
 ):
     """Save an irrigation schedule."""
     try:
@@ -133,9 +135,13 @@ async def create_schedule(
             start_time=data.start_time,
             duration_minutes=data.duration_minutes,
             water_volume=data.water_volume,
+            user_id=current_user["user_id"],
         )
         return {"status": "success", "schedule_id": schedule_id}
     except Exception as e:
+        import traceback
+        print("=== SCHEDULE CREATION ERROR ===")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

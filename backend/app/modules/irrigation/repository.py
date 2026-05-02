@@ -97,19 +97,27 @@ class IrrigationRepository:
         start_time: str,
         duration_minutes: int,
         water_volume: float,
+        user_id: str,
     ) -> str:
-        sched = IrrigationSchedule(
+        """Create new irrigation schedule with better error handling."""
+        try:
+            print(f"DEBUG add_schedule called: {field_id=} {target_date=} {start_time=} {duration_minutes=} {water_volume=}")
+            sched = IrrigationSchedule(
             field_id=field_id,
             target_date=date.fromisoformat(target_date),
-            start_time=start_time,
+            start_time=str(start_time) if not isinstance(start_time, str) else start_time,  
             duration_minutes=duration_minutes,
             water_volume=water_volume,
             status="pending",
+            user_id=user_id,
         )
-        self._session.add(sched)
-        await self._session.commit()
-        await self._session.refresh(sched)
-        return str(sched.id)
+            self._session.add(sched)
+            await self._session.commit()
+            await self._session.refresh(sched)
+            return str(sched.id)
+        except Exception as e:
+            await self._session.rollback()
+            raise Exception(f"Failed to create schedule: {str(e)}") from e
 
     async def get_schedules(self, limit: int = 10) -> list[dict]:
         stmt = select(IrrigationSchedule).order_by(IrrigationSchedule.created_at.desc()).limit(limit)

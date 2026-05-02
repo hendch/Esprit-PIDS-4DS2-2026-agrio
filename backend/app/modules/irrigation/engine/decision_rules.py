@@ -6,13 +6,31 @@ def evaluate_irrigation_need(
     soil_moisture_pct: float,
     forecast_rain_mm: float,
 ) -> dict:
-    if soil_moisture_pct > 80:
+    # Skip if moisture already very high
+    if soil_moisture_pct >= 80:
         return {
             "decision": "skip",
             "reason": "Soil moisture already above 80%",
             "recommended_mm": 0.0,
         }
-
+    
+    # CRITICAL: Check 50% threshold first
+    if soil_moisture_pct < 50:
+        # But check rain forecast before deciding to irrigate
+        if forecast_rain_mm >= etc_mm:
+            return {
+                "decision": "skip",
+                "reason": "Moisture below 50% but forecasted rain covers crop water demand",
+                "recommended_mm": 0.0,
+            }
+        # Moisture low AND insufficient rain -> IRRIGATE
+        return {
+            "decision": "irrigate",
+            "reason": "Soil moisture below 50% threshold and insufficient rain forecast",
+            "recommended_mm": etc_mm,
+        }
+    
+    # Moisture >= 50%, check if rain covers crop need
     if forecast_rain_mm >= etc_mm:
         return {
             "decision": "skip",
@@ -20,6 +38,7 @@ def evaluate_irrigation_need(
             "recommended_mm": 0.0,
         }
 
+    # Moisture adequate but partial rain expected
     deficit = etc_mm - forecast_rain_mm
     recommended = max(deficit, 0.0)
 
@@ -30,8 +49,9 @@ def evaluate_irrigation_need(
             "recommended_mm": round(recommended, 2),
         }
 
+    # Moisture adequate, no rain expected -> skip
     return {
-        "decision": "irrigate",
-        "reason": "No rain expected and soil moisture below threshold",
-        "recommended_mm": round(recommended, 2),
+        "decision": "skip",
+        "reason": "Soil moisture adequate (>= 50%) and no additional water needed",
+        "recommended_mm": 0.0,
     }

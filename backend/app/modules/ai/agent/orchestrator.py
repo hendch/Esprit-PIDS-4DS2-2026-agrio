@@ -15,11 +15,15 @@ class IrrigationAgent:
     """LLM-powered agent that reasons about irrigation decisions."""
 
     def __init__(self) -> None:
+        if not settings.groq_api_key:
+            raise ValueError("GROQ_API_KEY is missing in settings!")
+
         self.llm = ChatGroq(
             api_key=settings.groq_api_key,
             model=settings.groq_model,
             temperature=0,
         )
+
         from app.modules.ai.agent.tools import (
             calculate_crop_water_need,
             control_irrigation_pump,
@@ -45,15 +49,14 @@ class IrrigationAgent:
         lon: float = 10.18,
     ) -> str:
         prompt = (
-            "You are an irrigation decision agent.\n\n"
+            "You are an expert irrigation decision agent.\n\n"
             f"Task: {query}\n\n"
-            "Available tools: fetch_weather, calc_water, read_moisture, "
-            "control_pump, log_event\n\n"
-            "Reason through the decision step by step, "
-            "then provide a final recommendation."
+            "Use tools when needed and give clear final decision."
         )
+
         reasoning = self.llm.invoke(prompt)
-        logger.info("LLM reasoning: %s", reasoning.content[:200])
+        logger.info("LLM reasoning: %s", reasoning.content[:300])
+
         return self._execute_decision(
             reasoning=reasoning.content,
             crop=crop,
@@ -70,57 +73,76 @@ class IrrigationAgent:
         lat: float,
         lon: float,
     ) -> str:
+        # Get real data
         weather = self.tools["fetch_weather"].invoke({"lat": lat, "lon": lon})
         moisture = self.tools["read_moisture"].invoke({})
         water_need = self.tools["calc_water"].invoke(
             {
-                "et0": float(weather["et0"]),
+                "et0": float(weather.get("et0", 0)),
                 "crop": crop,
                 "growth_stage": growth_stage,
             }
         )
 
         decision = evaluate_irrigation_need(
-            etc_mm=float(water_need["etc_mm_per_day"]),
-            soil_moisture_pct=float(moisture["moisture_percent"]),
-            forecast_rain_mm=float(weather["precipitation"]),
+            etc_mm=float(water_need.get("etc_mm_per_day", 0)),
+            soil_moisture_pct=float(moisture.get("moisture_percent", 0)),
+            forecast_rain_mm=float(weather.get("precipitation", 0)),
         )
+
         explanation = build_explanation(
-            eto=float(weather["et0"]),
-            kc=float(water_need["kc"]),
-            etc=float(water_need["etc_mm_per_day"]),
-            soil_moisture=float(moisture["moisture_percent"]),
-            forecast_rain=float(weather["precipitation"]),
+            eto=float(weather.get("et0", 0)),
+            kc=float(water_need.get("kc", 0)),
+            etc=float(water_need.get("etc_mm_per_day", 0)),
+            soil_moisture=float(moisture.get("moisture_percent", 0)),
+            forecast_rain=float(weather.get("precipitation", 0)),
             decision_result=decision,
         )
 
-        if decision["decision"] in {"irrigate", "reduce"} and decision["recommended_mm"] > 0:
+        # === IRRIGATE / REDUCE ===
+        if decision["decision"] in {"irrigate", "reduce"} and decision.get("recommended_mm", 0) > 0:
             recommended_mm = float(decision["recommended_mm"])
             duration = max(60, int(recommended_mm * 45))
+
+            logger.info(f"Activating pump for {duration} seconds ({recommended_mm:.1f}mm)")
+
             self.tools["control_pump"].invoke(
                 {"action": "ON", "duration_seconds": duration}
             )
-            self.tools["log_event"].invoke(
-                {
-                    "moisture": moisture["moisture_percent"],
-                    "amount": recommended_mm,
-                    "duration": duration,
-                    "crop": crop,
-                    "weather": str(weather),
-                }
-            )
+
+            self.tools["log_event"].invoke({
+                "moisture": moisture.get("moisture_percent"),
+                "amount": recommended_mm,
+                "duration": duration,
+                "crop": crop,
+                "weather": str(weather),
+            })
+
             return (
-                f"{decision['decision'].capitalize()} - ET0 {weather['et0']:.2f}, "
-                f"Kc {water_need['kc']:.2f}, ETc {water_need['etc_mm_per_day']:.2f}, "
-                f"rain {weather['precipitation']:.2f} mm, moisture {moisture['moisture_percent']:.1f}%. "
-                f"Apply {recommended_mm:.2f} mm (pump {duration}s). "
-                f"Reason: {decision['reason']}. "
-                f"Confidence: {explanation['confidence']:.2f}."
+                f"{decision['decision'].capitalize()} - "
+                f"Recommended {recommended_mm:.1f}mm → Pump ON for {duration}s. "
+                f"Reason: {decision['reason']}"
             )
 
-        return (
-            f"Skip - ET0 {weather['et0']:.2f}, Kc {water_need['kc']:.2f}, "
-            f"ETc {water_need['etc_mm_per_day']:.2f}, rain {weather['precipitation']:.2f} mm, "
-            f"moisture {moisture['moisture_percent']:.1f}%. "
-            f"Reason: {decision['reason']}. Confidence: {explanation['confidence']:.2f}."
-        )
+        # === NO IRRIGATION NEEDED → TURN PUMP OFF ===
+        else:
+            logger.info("No irrigation needed → Turning pump OFF")
+
+            # Fixed: Provide duration_seconds even for OFF
+            self.tools["control_pump"].invoke(
+                {"action": "OFF", "duration_seconds": 0}
+            )
+
+            self.tools["log_event"].invoke({
+                "moisture": moisture.get("moisture_percent"),
+                "amount": 0.0,
+                "duration": 0,
+                "crop": crop,
+                "weather": str(weather),
+            })
+
+            return (
+                f"No irrigation needed. "
+                f"Reason: {decision['reason']}. "
+                f"Moisture: {moisture.get('moisture_percent', 0):.1f}%"
+            )

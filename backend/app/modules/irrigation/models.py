@@ -26,6 +26,7 @@ class IrrigationSchedule(Base, TimestampMixin):
     __tablename__ = "irrigation_schedules"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[str] = mapped_column(String, index=True)  
     field_id: Mapped[str] = mapped_column(String, index=True)
     target_date: Mapped[date] = mapped_column(Date, index=True)
     start_time: Mapped[str] = mapped_column(String)
