@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import SecretStr
+
 
 
 class Settings(BaseSettings):
@@ -44,6 +46,9 @@ class Settings(BaseSettings):
     produce_forecast_cache_dir: str = "data/produce_prices/cache"
     produce_forecast_horizon: int = 12
     produce_retrain_on_startup: bool = False
+
+    cdse_client_id: str | None = None
+    cdse_client_secret: SecretStr | None = None
 
     # Comma-separated; cannot use * when allow_credentials=True. Include Expo web dev server.
     cors_origins: str = Field(

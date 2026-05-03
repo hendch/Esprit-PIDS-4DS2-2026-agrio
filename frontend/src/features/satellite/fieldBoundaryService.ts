@@ -10,6 +10,13 @@ export type FieldBoundaryPayload = {
   cropType?: string;
   areaHa?: number;
   points: BoundaryPoint[];
+
+  // Enriched field profile
+  governorate?: string;
+  plantingDate?: string;
+  irrigated?: boolean;
+  irrigationMethod?: string;
+  fieldNotes?: string;
 };
 
 export type FieldBoundaryRecord = {
@@ -19,6 +26,17 @@ export type FieldBoundaryRecord = {
   areaHa?: number;
   createdAt: string;
   points: BoundaryPoint[];
+
+  // Enriched field profile
+  governorate?: string;
+  plantingDate?: string;
+  irrigated: boolean;
+  irrigationMethod?: string;
+  fieldNotes?: string;
+
+  // Derived context
+  centroidLat?: number;
+  centroidLon?: number;
 };
 
 type FieldApiResponse = {
@@ -32,6 +50,15 @@ type FieldApiResponse = {
     type: "Polygon";
     coordinates: number[][][];
   };
+
+  // Enriched field profile from backend
+  centroid_lat?: number | null;
+  centroid_lon?: number | null;
+  governorate?: string | null;
+  planting_date?: string | null;
+  irrigated?: boolean;
+  irrigation_method?: string | null;
+  field_notes?: string | null;
 };
 
 export type FieldStatus = "Good" | "Warning" | "Poor";
@@ -49,14 +76,28 @@ export type FieldDisplayItem = {
   estHarvest: string;
   imageTint: string;
   points: BoundaryPoint[];
+
+  // Enriched field profile
+  governorate?: string;
+  irrigated: boolean;
+  irrigationMethod?: string;
+  fieldNotes?: string;
+  plantingDate?: string;
+
+  // Derived context
+  centroidLat?: number;
+  centroidLon?: number;
 };
 
 function toGeoJsonPolygon(points: BoundaryPoint[]) {
   const ring = points.map((point) => [point.longitude, point.latitude]);
   const first = ring[0];
   const last = ring[ring.length - 1];
+
   const closedRing =
-    first && last && (first[0] !== last[0] || first[1] !== last[1]) ? [...ring, first] : ring;
+    first && last && (first[0] !== last[0] || first[1] !== last[1])
+      ? [...ring, first]
+      : ring;
 
   return {
     type: "Polygon" as const,
@@ -69,11 +110,18 @@ function fromGeoJsonPolygon(boundary: FieldApiResponse["boundary"]): BoundaryPoi
   if (ring.length === 0) {
     return [];
   }
+
   const withoutClosingPoint =
-    ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]
+    ring.length > 1 &&
+    ring[0][0] === ring[ring.length - 1][0] &&
+    ring[0][1] === ring[ring.length - 1][1]
       ? ring.slice(0, -1)
       : ring;
-  return withoutClosingPoint.map(([longitude, latitude]) => ({ latitude, longitude }));
+
+  return withoutClosingPoint.map(([longitude, latitude]) => ({
+    latitude,
+    longitude,
+  }));
 }
 
 function toFieldBoundaryRecord(data: FieldApiResponse): FieldBoundaryRecord {
@@ -84,22 +132,45 @@ function toFieldBoundaryRecord(data: FieldApiResponse): FieldBoundaryRecord {
     areaHa: data.area_ha ?? undefined,
     createdAt: data.created_at,
     points: fromGeoJsonPolygon(data.boundary),
+
+    governorate: data.governorate ?? undefined,
+    plantingDate: data.planting_date ?? undefined,
+    irrigated: Boolean(data.irrigated),
+    irrigationMethod: data.irrigation_method ?? undefined,
+    fieldNotes: data.field_notes ?? undefined,
+
+    centroidLat: data.centroid_lat ?? undefined,
+    centroidLon: data.centroid_lon ?? undefined,
   };
 }
 
-function formatDate(value: string): string {
+function formatDate(value?: string): string {
+  if (!value) {
+    return "Not set";
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "Not set";
   }
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
-function estimateHarvestDate(value: string): string {
+function estimateHarvestDate(value?: string): string {
+  if (!value) {
+    return "Not set";
+  }
+
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "Not set";
   }
+
   date.setMonth(date.getMonth() + 5);
   return formatDate(date.toISOString());
 }
@@ -111,19 +182,32 @@ function colorForIndex(index: number): string {
 
 export function toFieldDisplayItem(record: FieldBoundaryRecord, index = 0): FieldDisplayItem {
   const crop = record.cropType || "Unassigned crop";
+
   return {
     id: record.id,
     name: record.name,
     crop,
+
+    // NOTE: these are still placeholder display values for now.
+    // We can remove/replace them later in LandScreen and FieldDetailScreen.
     status: "Good",
     ndvi: 0.72,
     soilFertility: "Medium",
-    areaHa: Number((record.areaHa ?? 0).toFixed(2)),
     healthScore: 86,
-    planted: formatDate(record.createdAt),
-    estHarvest: estimateHarvestDate(record.createdAt),
+
+    areaHa: Number((record.areaHa ?? 0).toFixed(2)),
+    planted: formatDate(record.plantingDate || record.createdAt),
+    estHarvest: estimateHarvestDate(record.plantingDate || record.createdAt),
     imageTint: colorForIndex(index),
     points: record.points,
+
+    governorate: record.governorate,
+    irrigated: record.irrigated,
+    irrigationMethod: record.irrigationMethod,
+    fieldNotes: record.fieldNotes,
+    plantingDate: record.plantingDate,
+    centroidLat: record.centroidLat,
+    centroidLon: record.centroidLon,
   };
 }
 
@@ -137,13 +221,22 @@ export async function getFieldBoundary(fieldId: string): Promise<FieldBoundaryRe
   return toFieldBoundaryRecord(data);
 }
 
-export async function saveFieldBoundary(payload: FieldBoundaryPayload): Promise<FieldBoundaryRecord> {
+export async function saveFieldBoundary(
+  payload: FieldBoundaryPayload,
+): Promise<FieldBoundaryRecord> {
   const { data } = await httpClient.post<FieldApiResponse>("/api/v1/fields/", {
     name: payload.name,
     crop_type: payload.cropType ?? null,
     area_ha: payload.areaHa ?? null,
     boundary: toGeoJsonPolygon(payload.points),
+
+    governorate: payload.governorate ?? null,
+    planting_date: payload.plantingDate ?? null,
+    irrigated: payload.irrigated ?? false,
+    irrigation_method: payload.irrigationMethod ?? null,
+    field_notes: payload.fieldNotes ?? null,
   });
 
   return toFieldBoundaryRecord(data);
 }
+``
