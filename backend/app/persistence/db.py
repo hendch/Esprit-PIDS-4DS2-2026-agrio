@@ -31,6 +31,7 @@ async def init_models() -> None:
     from app.modules.auth import models as _auth_models  # noqa: F401
     from app.modules.disease import models as _disease_models  # noqa: F401
     from app.modules.farms import models as _farm_models  # noqa: F401
+    from app.modules.gamification import models as _gamification_models  # noqa: F401
     from app.modules.irrigation import models as _irrigation_models  # noqa: F401
     from app.modules.ledger import models as _ledger_models  # noqa: F401
     from app.modules.livestock import models as _livestock_models  # noqa: F401

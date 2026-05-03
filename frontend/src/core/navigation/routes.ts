@@ -12,6 +12,8 @@ export const Routes = {
   FarmTrustLedger: "FarmTrustLedger",
   MarketPrices: "MarketPrices",
   ProducePrices: "ProducePrices",
+  Settings: "Settings",
+  Profile: "Profile",
 } as const;
 
 export type RouteName = (typeof Routes)[keyof typeof Routes];

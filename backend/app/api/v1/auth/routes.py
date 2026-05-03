@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.di import get_db
 from app.middleware.auth import CurrentUser
-from app.modules.auth.models import User
+from app.modules.auth.models import TutorialProgress, User
 from app.modules.auth.repository import AuthRepository
-from app.modules.auth.service import AuthService
+from app.modules.auth.service import AuthService, is_profile_complete
 
 from .schemas import (
     ChangePasswordRequest,
@@ -32,9 +34,30 @@ def _to_user_response(user: User) -> UserResponse:
         email=user.email,
         display_name=user.display_name,
         is_active=user.is_active,
+        phone=user.phone,
+        region=user.region,
+        years_experience=user.years_experience,
+        animal_types=user.animal_types,
+        bio=user.bio,
+        avatar_url=user.avatar_url,
+        is_verified_farmer=user.is_verified_farmer,
         created_at=user.created_at,
         updated_at=user.updated_at,
     )
+
+
+async def _maybe_award_badge(db: AsyncSession, user: User) -> None:
+    """Set is_verified_farmer=True when profile is complete AND tutorial is done."""
+    if user.is_verified_farmer or not is_profile_complete(user):
+        return
+    result = await db.execute(
+        select(TutorialProgress).where(TutorialProgress.user_id == user.id)
+    )
+    tutorial = result.scalar_one_or_none()
+    if tutorial and tutorial.is_completed:
+        user.is_verified_farmer = True
+        await db.commit()
+        await db.refresh(user)
 
 
 def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
@@ -44,6 +67,7 @@ def get_auth_service(db: AsyncSession = Depends(get_db)) -> AuthService:
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
+    db: AsyncSession = Depends(get_db),
     service: AuthService = Depends(get_auth_service),
 ) -> TokenResponse:
     try:
@@ -55,6 +79,22 @@ async def login(
         ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    _result = await db.execute(
+        select(User.id, User.is_verified_farmer).where(User.email == body.email.lower())
+    )
+    _row = _result.one_or_none()
+    if _row:
+        _uid, _ivf = str(_row.id), bool(_row.is_verified_farmer)
+
+        async def _login_award_bg() -> None:
+            from app.persistence.db import AsyncSessionLocal
+            from app.modules.gamification.service import GamificationService
+            async with AsyncSessionLocal() as _db:
+                await GamificationService().award_daily_login(_db, _uid, _ivf)
+
+        asyncio.create_task(_login_award_bg())
+
     return TokenResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -149,19 +189,87 @@ async def refresh_token(
 async def update_me(
     body: UpdateProfileRequest,
     current_user: dict = CurrentUser,
-    service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
-    if body.email is None and body.display_name is None:
+    all_fields = [body.email, body.display_name, body.phone, body.region,
+                  body.years_experience, body.animal_types, body.bio, body.avatar_url]
+    if all(v is None for v in all_fields):
         raise HTTPException(status_code=400, detail="Nothing to update")
 
-    try:
-        user = await service.update_profile(
-            uuid.UUID(current_user["user_id"]),
-            email=body.email,
-            display_name=body.display_name,
+    user_id = uuid.UUID(current_user["user_id"])
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Email requires uniqueness check
+    if body.email is not None:
+        dup = await db.execute(
+            select(User).where(User.email == body.email.lower(), User.id != user_id)
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if dup.scalar_one_or_none():
+            raise HTTPException(status_code=400, detail="Email is already registered")
+        user.email = body.email.lower()
+
+    if body.display_name is not None:
+        user.display_name = body.display_name
+    if body.phone is not None:
+        user.phone = body.phone
+    if body.region is not None:
+        user.region = body.region
+    if body.years_experience is not None:
+        user.years_experience = body.years_experience
+    if body.animal_types is not None:
+        user.animal_types = body.animal_types
+    if body.bio is not None:
+        user.bio = body.bio
+    if body.avatar_url is not None:
+        user.avatar_url = body.avatar_url
+
+    await db.commit()
+    await db.refresh(user)
+    await _maybe_award_badge(db, user)
+    return _to_user_response(user)
+
+
+@router.post("/me/avatar", response_model=UserResponse)
+async def upload_avatar(
+    request: Request,
+    file: UploadFile,
+    current_user: dict = CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    from app.modules.media.storage.local_storage import LocalObjectStorage
+
+    ALLOWED = {"image/jpeg", "image/png", "image/webp"}
+    if file.content_type not in ALLOWED:
+        raise HTTPException(status_code=422, detail="Unsupported type. Allowed: jpeg, png, webp.")
+
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 5 MB).")
+
+    ext = "jpg"
+    if file.filename and "." in file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower()
+
+    key = f"avatar_{uuid.uuid4()}.{ext}"
+    storage = LocalObjectStorage(root_dir="./media_uploads")
+    await storage.put(key, data, file.content_type or "image/jpeg")
+
+    base = str(request.base_url).rstrip("/")
+    avatar_url = f"{base}/media_uploads/{key}"
+
+    user_id = uuid.UUID(current_user["user_id"])
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.avatar_url = avatar_url
+    await db.commit()
+    await db.refresh(user)
+    await _maybe_award_badge(db, user)
     return _to_user_response(user)
 
 

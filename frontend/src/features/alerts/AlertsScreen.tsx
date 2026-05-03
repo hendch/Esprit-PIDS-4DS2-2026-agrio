@@ -23,6 +23,7 @@ import {
   SERIES_DISPLAY,
   SERIES_UNIT,
 } from "./alertsApi";
+import { useTutorialStore } from "../../core/tutorial/store";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
@@ -152,6 +153,7 @@ export function AlertsScreen() {
       setNewThreshold("");
       setNewSeries(SERIES_KEYS[0]);
       setNewCondition("above");
+      useTutorialStore.getState().checkAndAdvance('set_price_alert');
     } catch {
       Alert.alert("Error", "Could not create alert. Please try again.");
     } finally {
@@ -209,14 +211,21 @@ export function AlertsScreen() {
             />
           }
         >
-          <Text style={styles.pageTitle}>Price Alerts</Text>
-          <Text style={styles.pageSubtitle}>
-            {loading
-              ? "Loading…"
-              : error
-              ? error
-              : `${activeAlerts.length} active alert${activeAlerts.length !== 1 ? "s" : ""}.`}
-          </Text>
+          <View style={styles.pageHeader}>
+            <View>
+              <Text style={styles.pageTitle}>Price Alerts</Text>
+              <Text style={styles.pageSubtitle}>
+                {loading
+                  ? "Loading…"
+                  : error
+                  ? error
+                  : `${activeAlerts.length} active alert${activeAlerts.length !== 1 ? "s" : ""}.`}
+              </Text>
+            </View>
+            <Pressable style={styles.headerAddBtn} onPress={() => setShowForm(true)}>
+              <Text style={styles.headerAddBtnText}>＋</Text>
+            </Pressable>
+          </View>
 
           {loading ? (
             <ActivityIndicator color={GREEN} style={{ marginTop: 40 }} />
@@ -293,13 +302,6 @@ export function AlertsScreen() {
 
         <TabBar active="Alerts" />
 
-        {/* FAB */}
-        <Pressable
-          style={styles.fab}
-          onPress={() => setShowForm(true)}
-        >
-          <Text style={styles.fabText}>＋</Text>
-        </Pressable>
       </View>
 
       {/* ── Inline bottom sheet (no Modal) ── */}
@@ -420,8 +422,11 @@ const styles = StyleSheet.create({
   headerRight: { fontSize: 14, color: "#666", fontWeight: "500" },
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: 24, paddingTop: 20 },
+  pageHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 20 },
   pageTitle: { fontSize: 22, fontWeight: "800", color: "#2C2C2C", marginBottom: 4 },
-  pageSubtitle: { fontSize: 14, color: "#666", marginBottom: 20 },
+  pageSubtitle: { fontSize: 14, color: "#666" },
+  headerAddBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: GREEN, alignItems: "center", justifyContent: "center", elevation: 4, shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 3 },
+  headerAddBtnText: { fontSize: 26, color: "#FFF", fontWeight: "700", lineHeight: 30 },
   summaryRow: { flexDirection: "row", gap: 12, marginBottom: 24 },
   summaryCard: {
     flex: 1,
@@ -477,7 +482,7 @@ const styles = StyleSheet.create({
   // FAB
   fab: {
     position: "absolute",
-    bottom: 24 + 80,
+    bottom: 24 + 80 + 40,
     right: 24,
     width: 56,
     height: 56,

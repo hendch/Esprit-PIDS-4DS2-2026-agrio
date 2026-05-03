@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user
+from app.modules.auth.models import User
 from app.modules.livestock.service import LivestockService
 from app.persistence.db import get_async_session
 
@@ -129,16 +132,33 @@ async def add_health_event(
     farm_id: uuid.UUID,
     body: HealthEventCreate,
     db: DbSession,
-    _: dict = Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ) -> dict:
     try:
-        return await LivestockService.add_health_event(
+        result = await LivestockService.add_health_event(
             db, animal_id, farm_id, body.model_dump()
         )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+    _uid = uuid.UUID(current_user["user_id"])
+    _ivf_result = await db.execute(select(User.is_verified_farmer).where(User.id == _uid))
+    _ivf = bool(_ivf_result.scalar_one_or_none())
+    _uid_str = str(_uid)
+
+    async def _bg_health(uid: str, ivf: bool) -> None:
+        from app.persistence.db import AsyncSessionLocal
+        from app.modules.gamification.service import GamificationService
+        async with AsyncSessionLocal() as _db:
+            try:
+                await GamificationService().complete_daily_task(_db, uid, "record_health_event", ivf)
+            except Exception:
+                pass
+
+    asyncio.create_task(_bg_health(_uid_str, _ivf))
+    return result
 
 
 @router.delete("/animals/{animal_id}/health/{event_id}")

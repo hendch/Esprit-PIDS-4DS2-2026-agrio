@@ -28,6 +28,8 @@ class PostResponse(BaseModel):
     created_at: str | None
     liked_by_me: bool
     is_mine: bool
+    user_avatar_url: str | None = None
+    user_is_verified_farmer: bool = False
 
 
 class CommentResponse(BaseModel):
@@ -35,6 +37,7 @@ class CommentResponse(BaseModel):
     post_id: str
     user_id: str
     user_display_name: str | None
+    user_avatar_url: str | None = None
     content: str
     created_at: str | None
     is_mine: bool

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user
+from app.modules.auth.models import User
+from app.modules.community.models import Post
 from app.modules.community.service import CommunityService
 from app.persistence.db import get_async_session
 
@@ -92,11 +96,29 @@ async def add_comment(
 ) -> dict:
     user_id = uuid.UUID(current_user["user_id"])
     try:
-        return await CommunityService.add_comment(db, post_id, user_id, body.content)
+        result = await CommunityService.add_comment(db, post_id, user_id, body.content)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
+
+    _ivf_result = await db.execute(select(User.is_verified_farmer).where(User.id == user_id))
+    _ivf = bool(_ivf_result.scalar_one_or_none())
+    _uid_str = str(user_id)
+
+    async def _bg_comment(uid: str, ivf: bool) -> None:
+        from app.persistence.db import AsyncSessionLocal
+        from app.modules.gamification.service import GamificationService
+        async with AsyncSessionLocal() as _db:
+            svc = GamificationService()
+            await svc.award_comment(_db, uid, ivf)
+            try:
+                await svc.complete_daily_task(_db, uid, "post_or_comment", ivf)
+            except Exception:
+                pass
+
+    asyncio.create_task(_bg_comment(_uid_str, _ivf))
+    return result
 
 
 @router.delete("/posts/{post_id}/comments/{comment_id}")
@@ -124,6 +146,27 @@ async def toggle_like(
 ) -> dict:
     user_id = uuid.UUID(current_user["user_id"])
     try:
-        return await CommunityService.toggle_like(db, post_id, user_id)
+        result = await CommunityService.toggle_like(db, post_id, user_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+    if result.get("liked"):
+        _post_result = await db.execute(
+            select(Post.user_id, User.is_verified_farmer)
+            .join(User, Post.user_id == User.id)
+            .where(Post.id == post_id)
+        )
+        _post_row = _post_result.one_or_none()
+        if _post_row:
+            _owner_id = str(_post_row.user_id)
+            _owner_ivf = bool(_post_row.is_verified_farmer)
+
+            async def _bg_like(owner_id: str, ivf: bool) -> None:
+                from app.persistence.db import AsyncSessionLocal
+                from app.modules.gamification.service import GamificationService
+                async with AsyncSessionLocal() as _db:
+                    await GamificationService().award_post_liked(_db, owner_id, ivf)
+
+            asyncio.create_task(_bg_like(_owner_id, _owner_ivf))
+
+    return result

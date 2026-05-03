@@ -20,7 +20,12 @@ class CommunityRepository:
         limit: int = 20,
     ):
         stmt = (
-            select(Post, User.display_name.label("user_display_name"))
+            select(
+                Post,
+                User.display_name.label("user_display_name"),
+                User.is_verified_farmer.label("user_is_verified_farmer"),
+                User.avatar_url.label("user_avatar_url"),
+            )
             .join(User, Post.user_id == User.id)
             .where(Post.is_active == True)  # noqa: E712
         )
@@ -57,7 +62,11 @@ class CommunityRepository:
         limit: int = 50,
     ):
         stmt = (
-            select(PostComment, User.display_name.label("user_display_name"))
+            select(
+                PostComment,
+                User.display_name.label("user_display_name"),
+                User.avatar_url.label("user_avatar_url"),
+            )
             .join(User, PostComment.user_id == User.id)
             .where(PostComment.post_id == post_id, PostComment.is_active == True)  # noqa: E712
             .order_by(PostComment.created_at.asc())

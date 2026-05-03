@@ -10,6 +10,8 @@ export interface Post {
   created_at: string;
   liked_by_me: boolean;
   is_mine: boolean;
+  user_is_verified_farmer: boolean;
+  user_avatar_url: string | null;
 }
 
 export interface Comment {
@@ -20,6 +22,7 @@ export interface Comment {
   content: string;
   created_at: string;
   is_mine: boolean;
+  user_avatar_url: string | null;
 }
 
 export interface Category {

@@ -50,6 +50,9 @@ export interface AnimalPnL {
   purchase_price_source: 'manual' | 'estimated_from_date' | null;
   estimated_value: number | null;
   market_series: string | null;
+  unit: string;
+  slaughter_weight_kg: number | null;
+  price_per_kg: number | null;
   ownership_months: number | null;
   monthly_bales: number;
   tbn_price_per_bale: number | null;

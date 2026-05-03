@@ -22,6 +22,8 @@ import app.modules.notification.models  # noqa: F401
 import app.modules.produce_prices.db_models  # noqa: F401
 import app.modules.satellite.models  # noqa: F401
 import app.modules.community.models  # noqa: F401
+import app.modules.gamification.models  # noqa: F401
+# auth models include TutorialProgress — already imported above via app.modules.auth.models
 
 target_metadata = Base.metadata
 

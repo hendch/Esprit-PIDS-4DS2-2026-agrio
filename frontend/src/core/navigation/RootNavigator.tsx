@@ -16,7 +16,7 @@ export function RootNavigator() {
         ),
       )
     : new Set([Routes.Login, Routes.SignUp]);
-  const filteredRoutes = routes.filter((route) => allowedRouteNames.has(route.name as string));
+  const filteredRoutes = routes.filter((route) => (allowedRouteNames as Set<string>).has(route.name));
 
   return (
     <Stack.Navigator initialRouteName={isAuthenticated ? Routes.Dashboard : Routes.Login}>

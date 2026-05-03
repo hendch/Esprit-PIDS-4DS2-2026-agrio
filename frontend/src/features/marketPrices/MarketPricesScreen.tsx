@@ -17,6 +17,8 @@ import { useTheme } from "../../core/theme/useTheme";
 import { useMarketPricesStore } from "./store";
 import { styles } from "./MarketPricesScreen.styles";
 import { SERIES_DISPLAY } from "./types";
+import { useTutorialStore } from "../../core/tutorial/store";
+import { useGamificationStore } from "../gamification/store";
 
 function TabBar({ active }: { active: string }) {
   const nav = useNavigation<any>();
@@ -50,6 +52,9 @@ function TabBar({ active }: { active: string }) {
 
 export function MarketPricesContent() {
   const { width } = useWindowDimensions();
+  const tutorial = useTutorialStore();
+  const showForecastGotIt = tutorial.currentStep?.key === 'generate_forecast' && tutorial.isVisible;
+  const showRecommendationGotIt = tutorial.currentStep?.key === 'view_recommendation' && tutorial.isVisible;
 
   const {
     series, seriesLoading, seriesError, selectedSeries,
@@ -68,7 +73,10 @@ export function MarketPricesContent() {
     { key: "centre_et_sud", label: "Centre-Sud" },
   ];
 
-  useEffect(() => { fetchSeries(); }, []);
+  useEffect(() => {
+    fetchSeries();
+    useGamificationStore.getState().completeTask('check_market_prices');
+  }, []);
 
   useEffect(() => {
     setSelectedSeries(category === "livestock" ? "brebis_suitees" : "tbn");
@@ -345,6 +353,26 @@ export function MarketPricesContent() {
                   </View>
                 ))}
               </View>
+              {showForecastGotIt && forecastRows.length > 0 && (
+                <Pressable
+                  onPress={() => tutorial.checkAndAdvance('generate_forecast')}
+                  style={{
+                    marginTop: 12,
+                    marginHorizontal: 16,
+                    backgroundColor: '#2E7D32',
+                    borderRadius: 8,
+                    paddingVertical: 10,
+                    alignItems: 'center',
+                    flexDirection: 'row',
+                    justifyContent: 'center',
+                    gap: 6,
+                  }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
+                    ✓ Got it — I can see the forecast
+                  </Text>
+                </Pressable>
+              )}
             </>
           )}
 
@@ -421,6 +449,25 @@ export function MarketPricesContent() {
                   <Text style={styles.recFootnote}>
                     ⓘ Based on SARIMA 12-month forecast · Confidence interval 95%
                   </Text>
+                  {showRecommendationGotIt && (
+                    <Pressable
+                      onPress={() => tutorial.checkAndAdvance('view_recommendation')}
+                      style={{
+                        marginTop: 12,
+                        backgroundColor: '#2E7D32',
+                        borderRadius: 8,
+                        paddingVertical: 10,
+                        alignItems: 'center',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>
+                        ✓ Got it — I can see the recommendation
+                      </Text>
+                    </Pressable>
+                  )}
                 </>
               )}
             </View>

@@ -30,6 +30,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
 
 
+def is_profile_complete(user: User) -> bool:
+    """Badge condition: all key profile fields filled in."""
+    return all([
+        user.display_name,
+        user.phone,
+        user.region,
+        user.years_experience is not None,
+        user.animal_types and len(user.animal_types) > 0,
+        user.avatar_url,
+    ])
+
+
 class AuthService:
     def __init__(self, repo: AuthRepository) -> None:
         self._repo = repo

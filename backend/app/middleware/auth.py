@@ -18,6 +18,7 @@ _PUBLIC_AUTH_PATHS = frozenset(
         "/api/v1/auth/register",
         "/api/v1/auth/refresh",
         "/api/v1/community/categories",
+        "/api/v1/gamification/leaderboard",
     }
 )
 

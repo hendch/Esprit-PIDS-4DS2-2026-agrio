@@ -33,6 +33,8 @@ def _post_row_to_dict(row, liked_ids: set, current_user_id: uuid.UUID) -> dict:
         "created_at": post.created_at.isoformat() if post.created_at else None,
         "liked_by_me": post.id in liked_ids,
         "is_mine": post.user_id == current_user_id,
+        "user_is_verified_farmer": bool(getattr(row, "user_is_verified_farmer", False)),
+        "user_avatar_url": getattr(row, "user_avatar_url", None),
     }
 
 
@@ -43,6 +45,7 @@ def _comment_row_to_dict(row, current_user_id: uuid.UUID) -> dict:
         "post_id": str(comment.post_id),
         "user_id": str(comment.user_id),
         "user_display_name": row.user_display_name,
+        "user_avatar_url": getattr(row, "user_avatar_url", None),
         "content": comment.content,
         "created_at": comment.created_at.isoformat() if comment.created_at else None,
         "is_mine": comment.user_id == current_user_id,
@@ -107,11 +110,15 @@ class CommunityService:
             user_id,
             {"content": content, "category": category, "media_url": media_url},
         )
-        result = await db.execute(select(User.display_name).where(User.id == user_id))
-        display_name = result.scalar_one_or_none()
+        result = await db.execute(
+            select(User.display_name, User.is_verified_farmer).where(User.id == user_id)
+        )
+        user_row = result.one_or_none()
         return {
             **_post_to_dict(post),
-            "user_display_name": display_name,
+            "user_display_name": user_row.display_name if user_row else None,
+            "user_is_verified_farmer": bool(user_row.is_verified_farmer) if user_row else False,
+            "user_avatar_url": user_row.avatar_url if user_row else None,
             "liked_by_me": False,
             "is_mine": True,
         }
@@ -149,11 +156,14 @@ class CommunityService:
         if post is None or not post.is_active:
             raise LookupError(f"Post '{post_id}' not found or inactive.")
         comment = await repo.create_comment(post_id, user_id, content)
-        result = await db.execute(select(User.display_name).where(User.id == user_id))
-        display_name = result.scalar_one_or_none()
+        result = await db.execute(
+            select(User.display_name, User.avatar_url).where(User.id == user_id)
+        )
+        user_row = result.one_or_none()
         return {
             **_comment_to_dict(comment),
-            "user_display_name": display_name,
+            "user_display_name": user_row.display_name if user_row else None,
+            "user_avatar_url": user_row.avatar_url if user_row else None,
             "is_mine": True,
         }
 

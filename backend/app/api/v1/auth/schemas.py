@@ -48,6 +48,12 @@ class RefreshRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     email: EmailStr | None = None
     display_name: str | None = None
+    phone: str | None = None
+    region: str | None = None
+    years_experience: int | None = None
+    animal_types: list[str] | None = None
+    bio: str | None = None
+    avatar_url: str | None = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -84,6 +90,13 @@ class UserResponse(BaseModel):
     email: str
     display_name: str | None
     is_active: bool
+    phone: str | None = None
+    region: str | None = None
+    years_experience: int | None = None
+    animal_types: list[str] | None = None
+    bio: str | None = None
+    avatar_url: str | None = None
+    is_verified_farmer: bool = False
     created_at: datetime
     updated_at: datetime
 

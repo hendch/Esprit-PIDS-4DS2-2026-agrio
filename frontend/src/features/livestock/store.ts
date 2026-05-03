@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { livestockApi } from './api';
 import type { Animal, AnimalCreate, AnimalPnL, HealthEvent, HerdStats, MarketPrice } from './types';
+import { useTutorialStore } from '../../core/tutorial/store';
 
 interface LivestockState {
   farmId: string | null;
@@ -134,6 +135,7 @@ export const useLivestockStore = create<LivestockState>((set, get) => ({
     try {
       const animal = await livestockApi.createAnimal(data);
       set((s) => ({ animals: [animal, ...s.animals], submitting: false }));
+      useTutorialStore.getState().checkAndAdvance('add_animal');
     } catch (err: any) {
       const msg = err?.response?.data?.detail ?? err?.message ?? 'Failed to create animal';
       set({ error: msg, submitting: false });

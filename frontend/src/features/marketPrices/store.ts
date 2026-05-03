@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import { marketPricesApi } from "./api";
 import type { ForecastResponse, PricePoint, Recommendation, SeriesInfo } from "./types";
+import { useTutorialStore } from "../../core/tutorial/store";
+import { useGamificationStore } from "../gamification/store";
 
 interface MarketPricesState {
   // Series list
@@ -105,6 +107,7 @@ export const useMarketPricesStore = create<MarketPricesState>((set) => ({
         forecasts: { ...state.forecasts, [region]: data },
         forecastLoading: false,
       }));
+      useGamificationStore.getState().completeTask('generate_forecast');
     } catch (err: any) {
       set({
         forecastError: err?.message ?? "Failed to run forecast",

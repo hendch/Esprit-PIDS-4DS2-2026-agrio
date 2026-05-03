@@ -32,6 +32,13 @@ _TYPE_TO_SERIES: dict[str, str] = {
     "caprin":    "viandes_rouges",
 }
 
+# viandes_rouges quotes TND/kg live weight — multiply by typical slaughter weight to get TND/head
+SLAUGHTER_WEIGHT_KG: dict[str, int] = {
+    "agneau":    32,
+    "taurillon": 280,
+    "caprin":    25,
+}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -227,6 +234,13 @@ class LivestockService:
             if row:
                 market_price = row.price
 
+        # For animals sold by weight, convert TND/kg → TND/head
+        slaughter_weight = SLAUGHTER_WEIGHT_KG.get(animal.animal_type)
+        price_per_kg: float | None = None
+        if slaughter_weight and market_price is not None:
+            price_per_kg = market_price
+            market_price = market_price * slaughter_weight
+
         # Fetch latest straw (tbn) price for feed cost
         tbn_price = None
         result = await db.execute(
@@ -258,6 +272,9 @@ class LivestockService:
             if row:
                 purchase_price = row.price
                 purchase_price_source = "estimated_from_date"
+            # Historical viandes_rouges is also TND/kg — apply same conversion
+            if purchase_price is not None and slaughter_weight:
+                purchase_price = purchase_price * slaughter_weight
 
         # Feed cost covers the period the farmer has owned the animal,
         # not its full biological age. Use purchase_date first, birth_date as fallback.
@@ -324,8 +341,11 @@ class LivestockService:
             "purchase_price": purchase_price,
             "purchase_date": animal.purchase_date.isoformat() if animal.purchase_date else None,
             "purchase_price_source": purchase_price_source,
-            "estimated_value": market_price,
+            "estimated_value": round(market_price, 2) if market_price is not None else None,
             "market_series": series_name,
+            "unit": "TND/head",
+            "slaughter_weight_kg": slaughter_weight,
+            "price_per_kg": round(price_per_kg, 2) if price_per_kg is not None else None,
             "ownership_months": ownership_months,
             "monthly_bales": monthly_bales,
             "tbn_price_per_bale": tbn_price,

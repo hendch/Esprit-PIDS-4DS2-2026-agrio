@@ -12,6 +12,8 @@ import { alertsModule } from "../features/alerts/AlertsModule";
 import { farmTrustLedgerModule } from "../features/farmTrustLedger/FarmTrustLedgerModule";
 import { marketPricesModule } from "../features/marketPrices";
 import { producePricesModule } from "../features/producePrices";
+import { settingsModule } from "../features/settings/SettingsModule";
+import { profileModule } from "../features/profile/ProfileModule";
 
 let registered = false;
 
@@ -30,4 +32,6 @@ export function registerFeatures() {
   featureRegistry.register(farmTrustLedgerModule);
   featureRegistry.register(marketPricesModule);
   featureRegistry.register(producePricesModule);
+  featureRegistry.register(settingsModule);
+  featureRegistry.register(profileModule);
 }

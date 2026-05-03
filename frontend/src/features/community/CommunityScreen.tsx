@@ -25,6 +25,9 @@ import { communityApi } from './api';
 import { useCommunityStore } from './store';
 import type { Comment, Post } from './types';
 import { CATEGORY_MAP } from './types';
+import { useGamificationStore } from '../gamification/store';
+import { useProfileStore } from '../profile/store';
+import type { LeaderboardEntry } from '../gamification/types';
 
 // ─── constants ──────────────────────────────────────────────────────────────
 
@@ -112,11 +115,20 @@ function PostCard({ post, onPress, onLike, onDelete, truncate = true }: PostCard
     <Pressable style={styles.postCard} onPress={onPress}>
       {/* header row */}
       <View style={styles.postHeader}>
-        <View style={[styles.avatar, { backgroundColor: avatarColor(post.user_display_name) }]}>
-          <Text style={styles.avatarText}>{initial(post.user_display_name)}</Text>
-        </View>
+        {post.user_avatar_url ? (
+          <Image source={{ uri: post.user_avatar_url }} style={styles.avatar} />
+        ) : (
+          <View style={[styles.avatar, { backgroundColor: avatarColor(post.user_display_name) }]}>
+            <Text style={styles.avatarText}>{initial(post.user_display_name)}</Text>
+          </View>
+        )}
         <View style={styles.postMeta}>
-          <Text style={styles.postAuthor}>{post.user_display_name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.postAuthor}>{post.user_display_name}</Text>
+              {post.user_is_verified_farmer && (
+                <Text style={{ fontSize: 12, color: '#F59E0B' }}>🏅</Text>
+              )}
+            </View>
           <View style={[styles.catPill, { backgroundColor: bg }]}>
             <Text style={styles.catPillText}>
               {cat?.emoji ?? ''} {cat?.label ?? post.category}
@@ -198,9 +210,13 @@ function CommentRow({
       delayLongPress={400}
     >
       <View style={styles.commentTop}>
-        <View style={[styles.avatarSm, { backgroundColor: avatarColor(comment.user_display_name) }]}>
-          <Text style={styles.avatarSmText}>{initial(comment.user_display_name)}</Text>
-        </View>
+        {comment.user_avatar_url ? (
+          <Image source={{ uri: comment.user_avatar_url }} style={styles.avatarSm} />
+        ) : (
+          <View style={[styles.avatarSm, { backgroundColor: avatarColor(comment.user_display_name) }]}>
+            <Text style={styles.avatarSmText}>{initial(comment.user_display_name)}</Text>
+          </View>
+        )}
         <Text style={styles.commentAuthor}>{comment.user_display_name}</Text>
         <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
       </View>
@@ -216,6 +232,8 @@ export function CommunityScreen() {
   const { colors } = useTheme();
 
   const store = useCommunityStore();
+  const gamification = useGamificationStore();
+  const { profile } = useProfileStore();
   const {
     posts,
     selectedPost,
@@ -225,11 +243,11 @@ export function CommunityScreen() {
     loading,
     commentsLoading,
     submitting,
-    hasMore,
     page,
   } = store;
 
   const [view, setView] = useState<'feed' | 'post_detail'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'leaderboard'>('feed');
   const [showModal, setShowModal] = useState(false);
 
   // new-post form
@@ -250,6 +268,10 @@ export function CommunityScreen() {
     store.fetchCategories();
     store.fetchFeed(true);
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'leaderboard') gamification.fetchLeaderboard();
+  }, [activeTab]);
 
   // ── navigation helpers ──────────────────────────────────────────────────────
 
@@ -352,6 +374,77 @@ export function CommunityScreen() {
     }
   };
 
+  // ── render: leaderboard ─────────────────────────────────────────────────────
+
+  const renderLeaderboard = () => {
+    const RANK_STYLES: Record<number, { bg: string; emoji: string; color: string }> = {
+      1: { bg: '#FEF3C7', emoji: '🥇', color: '#D97706' },
+      2: { bg: '#F3F4F6', emoji: '🥈', color: '#6B7280' },
+      3: { bg: '#FEF9EE', emoji: '🥉', color: '#B45309' },
+    };
+
+    const renderEntry = ({ item }: { item: LeaderboardEntry }) => {
+      const rankStyle = RANK_STYLES[item.rank];
+      const isMe = item.user_id === profile?.id;
+      const initials = (item.display_name ?? '?').slice(0, 2).toUpperCase();
+
+      return (
+        <View style={[
+          styles.lbRow,
+          rankStyle && { backgroundColor: rankStyle.bg },
+          isMe && styles.lbRowMe,
+        ]}>
+          <Text style={[styles.lbRank, rankStyle && { color: rankStyle.color }]}>
+            {rankStyle ? rankStyle.emoji : `#${item.rank}`}
+          </Text>
+          {item.avatar_url ? (
+            <Image source={{ uri: item.avatar_url }} style={styles.lbAvatar} />
+          ) : (
+            <View style={[styles.lbAvatar, { backgroundColor: avatarColor(item.display_name ?? '?'), alignItems: 'center', justifyContent: 'center' }]}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#37474F' }}>{initials}</Text>
+            </View>
+          )}
+          <View style={{ flex: 1, marginLeft: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.lbName}>{item.display_name ?? 'Farmer'}</Text>
+              {item.is_verified_farmer && <Text style={{ fontSize: 12 }}>🏅</Text>}
+            </View>
+            <Text style={styles.lbStreak}>🔥 {item.login_streak} day streak</Text>
+          </View>
+          <Text style={styles.lbCoins}>🪙 {item.total_earned}</Text>
+        </View>
+      );
+    };
+
+    return (
+      <FlatList
+        data={gamification.leaderboard}
+        keyExtractor={(item) => item.user_id}
+        renderItem={renderEntry}
+        ListHeaderComponent={
+          <View style={styles.lbHeader}>
+            <Text style={styles.lbTitle}>🏆 Top Farmers</Text>
+            <Text style={styles.lbSubtitle}>Ranked by total coins earned</Text>
+          </View>
+        }
+        ListEmptyComponent={
+          gamification.loading ? (
+            <ActivityIndicator color={GREEN} style={{ marginTop: 60 }} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>🏆</Text>
+              <Text style={styles.emptyTitle}>No verified farmers yet</Text>
+              <Text style={styles.emptySubtitle}>
+                Complete your profile and tutorial to join the leaderboard!
+              </Text>
+            </View>
+          )
+        }
+        contentContainerStyle={{ paddingBottom: 80 + 24 }}
+      />
+    );
+  };
+
   // ── render: feed ────────────────────────────────────────────────────────────
 
   const renderFeed = () => (
@@ -379,77 +472,101 @@ export function CommunityScreen() {
         </Pressable>
       </View>
 
-      {/* category filter bar */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.filterBar}
-        contentContainerStyle={styles.filterBarContent}
-      >
+      {/* Feed / Leaderboard tab switcher */}
+      <View style={styles.tabSwitcher}>
         <Pressable
-          style={[styles.chip, activeCategory === null && styles.chipActive]}
-          onPress={() => store.setCategory(null)}
+          style={[styles.tabSwitchBtn, activeTab === 'feed' && styles.tabSwitchBtnActive]}
+          onPress={() => setActiveTab('feed')}
         >
-          <View style={styles.chipInner}>
-            <Text style={styles.chipEmoji}>🌍</Text>
-            <Text style={[styles.chipText, activeCategory === null && styles.chipTextActive]}>
-              {' '}All
-            </Text>
-          </View>
+          <Text style={[styles.tabSwitchText, activeTab === 'feed' && styles.tabSwitchTextActive]}>
+            📰 Feed
+          </Text>
         </Pressable>
-        {displayCategories.map((cat) => (
-          <Pressable
-            key={cat.key}
-            style={[styles.chip, activeCategory === cat.key && styles.chipActive]}
-            onPress={() => store.setCategory(cat.key)}
-          >
-            <View style={styles.chipInner}>
-              <Text style={styles.chipEmoji}>{cat.emoji}</Text>
-              <Text style={[styles.chipText, activeCategory === cat.key && styles.chipTextActive]}>
-                {' '}{cat.label}
-              </Text>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
+        <Pressable
+          style={[styles.tabSwitchBtn, activeTab === 'leaderboard' && styles.tabSwitchBtnActive]}
+          onPress={() => setActiveTab('leaderboard')}
+        >
+          <Text style={[styles.tabSwitchText, activeTab === 'leaderboard' && styles.tabSwitchTextActive]}>
+            🏆 Leaderboard
+          </Text>
+        </Pressable>
+      </View>
 
-      {/* post list */}
-      <FlatList
-        data={posts}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            onPress={() => openPostDetail(item)}
-            onLike={() => store.likePost(item.id)}
-            onDelete={() => confirmDeletePost(item.id)}
-            truncate
+      {activeTab === 'leaderboard' ? renderLeaderboard() : (
+        <>
+          {/* category filter bar */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.filterBar}
+            contentContainerStyle={styles.filterBarContent}
+          >
+            <Pressable
+              style={[styles.chip, activeCategory === null && styles.chipActive]}
+              onPress={() => store.setCategory(null)}
+            >
+              <View style={styles.chipInner}>
+                <Text style={styles.chipEmoji}>🌍</Text>
+                <Text style={[styles.chipText, activeCategory === null && styles.chipTextActive]}>
+                  {' '}All
+                </Text>
+              </View>
+            </Pressable>
+            {displayCategories.map((cat) => (
+              <Pressable
+                key={cat.key}
+                style={[styles.chip, activeCategory === cat.key && styles.chipActive]}
+                onPress={() => store.setCategory(cat.key)}
+              >
+                <View style={styles.chipInner}>
+                  <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+                  <Text style={[styles.chipText, activeCategory === cat.key && styles.chipTextActive]}>
+                    {' '}{cat.label}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          {/* post list */}
+          <FlatList
+            data={posts}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <PostCard
+                post={item}
+                onPress={() => openPostDetail(item)}
+                onLike={() => store.likePost(item.id)}
+                onDelete={() => confirmDeletePost(item.id)}
+                truncate
+              />
+            )}
+            onEndReached={store.loadMore}
+            onEndReachedThreshold={0.3}
+            onRefresh={() => store.fetchFeed(true)}
+            refreshing={loading && page === 0}
+            ListEmptyComponent={
+              loading ? (
+                <ActivityIndicator color={GREEN} style={{ marginTop: 60 }} />
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyEmoji}>🌱</Text>
+                  <Text style={styles.emptyTitle}>No posts yet in this category</Text>
+                  <Text style={styles.emptySubtitle}>
+                    Be the first to share something with the community
+                  </Text>
+                </View>
+              )
+            }
+            ListFooterComponent={
+              loading && page > 0 ? (
+                <ActivityIndicator color={GREEN} style={{ marginVertical: 16 }} />
+              ) : null
+            }
+            contentContainerStyle={{ paddingTop: 8, paddingBottom: 80 + 24 }}
           />
-        )}
-        onEndReached={store.loadMore}
-        onEndReachedThreshold={0.3}
-        onRefresh={() => store.fetchFeed(true)}
-        refreshing={loading && page === 0}
-        ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator color={GREEN} style={{ marginTop: 60 }} />
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🌱</Text>
-              <Text style={styles.emptyTitle}>No posts yet in this category</Text>
-              <Text style={styles.emptySubtitle}>
-                Be the first to share something with the community
-              </Text>
-            </View>
-          )
-        }
-        ListFooterComponent={
-          loading && page > 0 ? (
-            <ActivityIndicator color={GREEN} style={{ marginVertical: 16 }} />
-          ) : null
-        }
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: 80 + 24 }}
-      />
+        </>
+      )}
 
       <TabBar active="Community" />
     </View>
@@ -944,4 +1061,42 @@ const styles = StyleSheet.create({
   },
   postBtnDisabled: { backgroundColor: '#B0BEC5' },
   postBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
+
+  // Feed/Leaderboard tab switcher
+  tabSwitcher: {
+    flexDirection: 'row',
+    marginHorizontal: 16,
+    marginVertical: 8,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 10,
+    padding: 3,
+  },
+  tabSwitchBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  tabSwitchBtnActive: { backgroundColor: '#FFF', shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 4, elevation: 2 },
+  tabSwitchText: { fontSize: 13, color: '#6B7280', fontWeight: '600' },
+  tabSwitchTextActive: { color: '#111827' },
+
+  // Leaderboard
+  lbHeader: { padding: 16, paddingBottom: 8 },
+  lbTitle: { fontSize: 20, fontWeight: '800', color: '#111827' },
+  lbSubtitle: { fontSize: 13, color: '#6B7280', marginTop: 2 },
+  lbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E5E7EB',
+  },
+  lbRowMe: { borderWidth: 1.5, borderColor: GREEN, borderRadius: 12, marginHorizontal: 8, marginVertical: 3 },
+  lbRank: { fontSize: 22, width: 36, textAlign: 'center', fontWeight: '700' },
+  lbAvatar: { width: 40, height: 40, borderRadius: 20 },
+  lbName: { fontSize: 14, fontWeight: '700', color: '#111827' },
+  lbStreak: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  lbCoins: { fontSize: 15, fontWeight: '700', color: '#F59E0B' },
 });

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { communityApi } from './api';
 import type { Category, Comment, Post } from './types';
+import { useTutorialStore } from '../../core/tutorial/store';
 
 interface CommunityState {
   posts: Post[];
@@ -108,6 +109,7 @@ export const useCommunityStore = create<CommunityState>((set, get) => ({
     try {
       const post: Post = await communityApi.createPost({ content, category, media_url });
       set((s) => ({ posts: [post, ...s.posts], submitting: false }));
+      useTutorialStore.getState().checkAndAdvance('join_community');
     } catch (err: any) {
       const msg = err?.response?.data?.detail ?? err?.message ?? 'Failed to create post';
       set({ error: msg, submitting: false });

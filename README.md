@@ -125,6 +125,40 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
 
 ---
 
+## Market Prediction Data Files
+
+The market prediction feature requires source data files that are not
+tracked by git (too large). Place them in the correct folders before
+running the seed scripts:
+
+**Livestock & fodder prices** → `backend/app/modules/market_prices/raw/`
+- `evolution-du-prix-moyen-des-brebis-suitees-par-grande-region-en-dinar.xlsx`
+- `evolution-du-prix-moyen-des-genisses-pleines-par-grande-region-en-dinar.xlsx`
+- `evolution-du-prix-moyen-des-vaches-suitees-par-grande-region-en-dinar.xlsx`
+- `evolution-du-prix-moyen-de-vente-des-viandes-rouge-en-dinar-par-kilogramme-vif.xlsx`
+- `Évolution_des_prix_des_bovins_suivis_par_tête__toutes_races_confondues.xls`
+- `Évolution_des_prix_des_vaches_gestantes_par_tête.xls`
+- `تطور-أسعار-التبن.xlsx`
+- `تطور-أسعار-القرط.xlsx`
+
+**Produce prices** → `backend/app/modules/produce_prices/raw/`
+- `fruits.csv`
+- `legumes.csv`
+
+After placing the files, run:
+
+```bash
+cd backend
+python scripts/seed_market_prices.py
+python scripts/seed_produce_prices.py
+python scripts/warmup_forecasts.py
+python scripts/warmup_produce_forecasts.py
+```
+
+> Ask the team for these files — contact Yassine (yassine.bencheikh@esprit.tn).
+
+---
+
 ## 3) Frontend Setup
 
 Run all commands from `frontend/`:
