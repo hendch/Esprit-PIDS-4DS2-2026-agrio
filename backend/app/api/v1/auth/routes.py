@@ -96,6 +96,37 @@ async def me(
     return _to_user_response(user)
 
 
+@router.get("/me/farm")
+async def get_my_farm(
+    current_user: dict = CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the farm owned by the authenticated user, creating one if needed."""
+    from sqlalchemy import select, text
+    from app.modules.livestock.models import Animal  # noqa: F401 — ensure mapping loaded
+    try:
+        from app.persistence.base_model import Base
+        farm_table = Base.metadata.tables.get("farms")
+        if farm_table is None:
+            raise HTTPException(status_code=404, detail="Farm not found")
+        user_uuid = uuid.UUID(current_user["user_id"])
+        stmt = text("SELECT id FROM farms WHERE owner_id = :uid LIMIT 1")
+        result = await db.execute(stmt, {"uid": str(user_uuid)})
+        row = result.fetchone()
+        if row:
+            return {"farm_id": str(row[0])}
+        # Auto-create a farm for this user if none exists
+        new_id = uuid.uuid4()
+        await db.execute(
+            text("INSERT INTO farms (id, name, owner_id, created_at, updated_at) VALUES (:id, :name, :owner_id, now(), now())"),
+            {"id": str(new_id), "name": "My Farm", "owner_id": str(user_uuid)},
+        )
+        await db.commit()
+        return {"farm_id": str(new_id)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Could not resolve farm: {exc}") from exc
+
+
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
     body: RefreshRequest,

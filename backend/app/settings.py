@@ -36,6 +36,14 @@ class Settings(BaseSettings):
 
     open_meteo_base_url: str = "https://api.open-meteo.com"
     media_root: str = "./media"
+    market_data_dir: str = "./data/market_prices/raw"
+    market_forecast_cache_dir: str = "./data/market_prices/cache"
+    market_retrain_on_startup: bool = False
+
+    produce_data_dir: str = "data/produce_prices/raw"
+    produce_forecast_cache_dir: str = "data/produce_prices/cache"
+    produce_forecast_horizon: int = 12
+    produce_retrain_on_startup: bool = False
 
     # Comma-separated; cannot use * when allow_credentials=True. Include Expo web dev server.
     cors_origins: str = Field(

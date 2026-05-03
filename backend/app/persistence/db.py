@@ -34,7 +34,10 @@ async def init_models() -> None:
     from app.modules.irrigation import models as _irrigation_models  # noqa: F401
     from app.modules.ledger import models as _ledger_models  # noqa: F401
     from app.modules.livestock import models as _livestock_models  # noqa: F401
+    from app.modules.market_prices import db_models as _market_prices_models  # noqa: F401
     from app.modules.media import models as _media_models  # noqa: F401
+    from app.modules.notification import models as _notification_models  # noqa: F401
+    from app.modules.produce_prices import db_models as _produce_prices_models  # noqa: F401
     from app.modules.satellite import models as _satellite_models  # noqa: F401
 
     async with async_engine.begin() as conn:
