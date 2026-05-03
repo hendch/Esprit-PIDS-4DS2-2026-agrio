@@ -58,6 +58,47 @@ export const styles = StyleSheet.create({
   filterPillText: { fontSize: 13, color: '#555', fontWeight: '500' },
   filterPillTextActive: { color: BLUE, fontWeight: '700' },
 
+  // ── Herd stats card ──────────────────────────────────────────────────
+  statsCard: {
+    backgroundColor: '#F0F7FF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#C9E0FF',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  statsBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statsNumber: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#1565C0',
+  },
+  statsLabel: {
+    fontSize: 11,
+    color: '#555',
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  statsDivider: {
+    height: 1,
+    backgroundColor: '#C9E0FF',
+    marginVertical: 12,
+  },
+  statsWarning: {
+    fontSize: 12,
+    color: '#E65100',
+    fontWeight: '600',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+
   // ── Empty state ──────────────────────────────────────────────────────
   emptyState: { alignItems: 'center', paddingVertical: 60 },
   emptyEmoji: { fontSize: 56, marginBottom: 12 },

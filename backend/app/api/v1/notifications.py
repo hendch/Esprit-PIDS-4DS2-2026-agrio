@@ -152,3 +152,15 @@ async def trigger_alert_check(
 
     checker = PriceAlertChecker()
     return await checker.check_all(db)
+
+
+@router.post("/vaccination/check-now")
+async def trigger_vaccination_check(
+    db: DbSession,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Manually trigger the vaccination reminder checker. Useful for testing."""
+    from app.modules.notification.vaccination_checker import VaccinationChecker
+
+    checker = VaccinationChecker()
+    return await checker.check_all(db)

@@ -105,11 +105,13 @@ function TabBar({ active }: { active: string }) {
 function AnimalModal({
   visible,
   onClose,
+  onSaved,
   initial,
   farmId,
 }: {
   visible: boolean;
   onClose: () => void;
+  onSaved?: () => void;
   initial: Animal | null;
   farmId: string;
 }) {
@@ -168,6 +170,7 @@ function AnimalModal({
         await store.addAnimal(payload);
       }
       onClose();
+      onSaved?.();
     } catch (e: any) {
       setLocalError(e?.message ?? 'Error saving animal');
     }
@@ -402,6 +405,11 @@ export function LivestockScreen() {
     if (store.farmId) store.fetchAnimals();
   }, [store.farmId]);
 
+  // Load herd stats whenever farmId is ready
+  useEffect(() => {
+    if (store.farmId) store.fetchHerdStats(store.farmId);
+  }, [store.farmId]);
+
   const farmId = store.farmId ?? '';
 
   // Filtered animal list
@@ -433,11 +441,13 @@ export function LivestockScreen() {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete', style: 'destructive',
-          onPress: () => store.removeAnimal(animal.id),
+          onPress: () => store.removeAnimal(animal.id).then(() => {
+            if (farmId) store.fetchHerdStats(farmId);
+          }),
         },
       ]
     );
-  }, [store]);
+  }, [store, farmId]);
 
   const handleDeleteEvent = useCallback((event: HealthEvent) => {
     if (!store.selectedAnimal) return;
@@ -502,6 +512,51 @@ export function LivestockScreen() {
           <Text style={styles.addBtnText}>＋ Add</Text>
         </Pressable>
       </View>
+
+      {/* Herd stats card */}
+      {store.statsLoading && (
+        <View style={[styles.statsCard, { alignItems: 'center', height: 80, justifyContent: 'center' }]}>
+          <ActivityIndicator color="#1E88E5" />
+        </View>
+      )}
+      {!store.statsLoading && store.herdStats && store.herdStats.total_animals > 0 && (
+        <View style={styles.statsCard}>
+          <View style={styles.statsRow}>
+            <View style={styles.statsBox}>
+              <Text style={styles.statsNumber}>{store.herdStats.total_animals}</Text>
+              <Text style={styles.statsLabel}>Animals</Text>
+            </View>
+            <View style={styles.statsBox}>
+              <Text style={[styles.statsNumber, { fontSize: 17 }]}>
+                {Math.round(store.herdStats.total_herd_value).toLocaleString('fr-TN')} TND
+              </Text>
+              <Text style={styles.statsLabel}>Herd Value</Text>
+            </View>
+          </View>
+          <View style={styles.statsDivider} />
+          <View style={styles.statsRow}>
+            <View style={styles.statsBox}>
+              <Text style={styles.statsNumber}>
+                {store.herdStats.avg_age_months != null ? formatAge(store.herdStats.avg_age_months) : '—'}
+              </Text>
+              <Text style={styles.statsLabel}>Avg Age</Text>
+            </View>
+            <View style={styles.statsBox}>
+              <Text style={[styles.statsNumber, {
+                color: store.herdStats.due_vaccination > 0 ? '#E65100' : '#2E7D32',
+              }]}>
+                {store.herdStats.due_vaccination}
+              </Text>
+              <Text style={styles.statsLabel}>Due Vaccination</Text>
+            </View>
+          </View>
+          {store.herdStats.due_vaccination > 0 && (
+            <Text style={styles.statsWarning}>
+              ⚠ {store.herdStats.due_vaccination} animal{store.herdStats.due_vaccination > 1 ? 's' : ''} due for vaccination
+            </Text>
+          )}
+        </View>
+      )}
 
       {/* Filter pills */}
       <View style={styles.filterRow}>
@@ -839,6 +894,7 @@ export function LivestockScreen() {
       <AnimalModal
         visible={showAddModal}
         onClose={() => setShowAddModal(false)}
+        onSaved={() => { if (farmId) store.fetchHerdStats(farmId); }}
         initial={null}
         farmId={farmId}
       />

@@ -54,7 +54,8 @@ export function MarketPricesContent() {
   const {
     series, seriesLoading, seriesError, selectedSeries,
     history, historyLoading, forecasts, forecastError,
-    fetchSeries, setSelectedSeries, fetchHistory, fetchForecast,
+    recommendation, recommendationLoading,
+    fetchSeries, setSelectedSeries, fetchHistory, fetchForecast, fetchRecommendation,
   } = useMarketPricesStore();
 
   const [selectedRegion, setSelectedRegion] = useState("national");
@@ -88,6 +89,12 @@ export function MarketPricesContent() {
       fetchForecast(selectedSeries, forecastHorizon, false, selectedRegion);
     }
   }, [selectedRegion]);
+
+  useEffect(() => {
+    if (selectedSeries && forecasts[selectedRegion]) {
+      fetchRecommendation(selectedSeries, selectedRegion);
+    }
+  }, [selectedSeries, forecasts, selectedRegion]);
 
   const forecast = forecasts[selectedRegion] ?? null;
 
@@ -339,6 +346,84 @@ export function MarketPricesContent() {
                 ))}
               </View>
             </>
+          )}
+
+          {/* Recommendation card — shown after forecast loads */}
+          {forecast && (recommendationLoading || recommendation) && (
+            <View style={styles.recCard}>
+              <Text style={styles.recTitle}>🎯 AI Price Recommendation</Text>
+
+              {recommendationLoading && (
+                <View style={styles.recLoadingRow}>
+                  <ActivityIndicator size="small" color="#1E88E5" />
+                  <Text style={styles.recLoadingText}>Analysing forecast…</Text>
+                </View>
+              )}
+
+              {!recommendationLoading && recommendation && (
+                <>
+                  {/* Action banner */}
+                  <View style={recommendation.action === 'wait' ? styles.recBannerWait : styles.recBannerNeutral}>
+                    <Text style={[styles.recBannerText, { color: recommendation.action === 'wait' ? '#2E7D32' : '#1565C0' }]}>
+                      {recommendation.action === 'wait'
+                        ? '⏳ Consider waiting to sell'
+                        : '➡️ Prices stable — sell anytime'}
+                    </Text>
+                  </View>
+
+                  {/* Best / Worst month boxes */}
+                  <View style={styles.recBoxRow}>
+                    {/* Best month */}
+                    <View style={[styles.recBox, styles.recBoxGreen]}>
+                      <Text style={[styles.recBoxLabel, styles.recBoxLabelGreen]}>✅ Best time to sell</Text>
+                      <Text style={styles.recBoxMonth}>{recommendation.best_month.month_label}</Text>
+                      <Text style={styles.recBoxPrice}>
+                        {formatPrice(recommendation.best_month.forecast_price, recommendation.unit)}
+                      </Text>
+                      <View style={[styles.recBadge, styles.recBadgeGreen]}>
+                        <Text style={[styles.recBadgeText, styles.recBadgeTextGreen]}>
+                          +{recommendation.best_month.pct_above_current}% vs next month
+                        </Text>
+                      </View>
+                      <Text style={styles.recBoxRange}>
+                        [{formatPrice(recommendation.best_month.lower_95, recommendation.unit)} – {formatPrice(recommendation.best_month.upper_95, recommendation.unit)}]
+                      </Text>
+                    </View>
+
+                    {/* Worst month */}
+                    <View style={[styles.recBox, styles.recBoxRed]}>
+                      <Text style={[styles.recBoxLabel, styles.recBoxLabelRed]}>❌ Avoid selling</Text>
+                      <Text style={styles.recBoxMonth}>{recommendation.worst_month.month_label}</Text>
+                      <Text style={styles.recBoxPrice}>
+                        {formatPrice(recommendation.worst_month.forecast_price, recommendation.unit)}
+                      </Text>
+                      <View style={[styles.recBadge, styles.recBadgeRed]}>
+                        <Text style={[styles.recBadgeText, styles.recBadgeTextRed]}>
+                          -{recommendation.worst_month.pct_below_current}% vs next month
+                        </Text>
+                      </View>
+                      <Text style={styles.recBoxRange}>
+                        [{formatPrice(recommendation.worst_month.lower_95, recommendation.unit)} – {formatPrice(recommendation.worst_month.upper_95, recommendation.unit)}]
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Advice text */}
+                  <View style={styles.recAdviceBox}>
+                    <Text style={styles.recAdviceText}>{recommendation.sell_advice}</Text>
+                  </View>
+                  {recommendation.avoid_advice && (
+                    <View style={styles.recAvoidBox}>
+                      <Text style={styles.recAdviceText}>{recommendation.avoid_advice}</Text>
+                    </View>
+                  )}
+
+                  <Text style={styles.recFootnote}>
+                    ⓘ Based on SARIMA 12-month forecast · Confidence interval 95%
+                  </Text>
+                </>
+              )}
+            </View>
           )}
         </ScrollView>
       )}

@@ -36,4 +36,7 @@ export const livestockApi = {
 
   getPnL: (animal_id: string, farm_id: string) =>
     httpClient.get(`${BASE}/animals/${animal_id}/pnl`, { params: { farm_id } }).then(r => r.data),
+
+  getHerdStats: (farm_id: string) =>
+    httpClient.get(`${BASE}/animals/stats`, { params: { farm_id } }).then(r => r.data),
 };

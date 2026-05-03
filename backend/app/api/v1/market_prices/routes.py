@@ -13,17 +13,18 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user
 from app.modules.market_prices.data.loader import ALL_SERIES, LivestockDataLoader
 from app.modules.market_prices.pipeline import ForecastPipeline
+from app.modules.market_prices.recommendations import generate_recommendation
 from app.modules.market_prices.repository import MarketPriceRepository
 from app.persistence.db import get_async_session
 
@@ -342,6 +343,99 @@ async def get_forecast_scenarios(series_name: str, db: DbSession, _: dict = Depe
         generated_at=record.generated_at.isoformat(),
         scenarios=[ScenarioPoint(**s) for s in data.get("scenarios", [])],
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /series/{series_name}/recommendation
+# ---------------------------------------------------------------------------
+
+
+def _is_forecast_stale(forecast_list: list) -> bool:
+    """Return True if every row in the forecast list is in the past."""
+    if not forecast_list:
+        return True
+    current_month = date.today().replace(day=1)
+    for row in forecast_list:
+        ym = row["date"][:7]  # YYYY-MM
+        if date(int(ym[:4]), int(ym[5:7]), 1) >= current_month:
+            return False
+    return True
+
+
+async def _run_and_save_forecast(
+    series_name: str,
+    region: str,
+    repo: MarketPriceRepository,
+) -> tuple[list, str]:
+    """Run the pipeline and persist the result. Returns (forecast_list, model_used)."""
+    try:
+        pipeline = ForecastPipeline()
+        result = pipeline.run(series_name=series_name, horizon=12, model="auto", region=region)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Pipeline failed for series '%s'", series_name)
+        raise HTTPException(status_code=500, detail=f"Forecast pipeline error: {exc}")
+
+    if "error" in result:
+        raise HTTPException(status_code=422, detail=result["error"])
+
+    history_rows = result.pop("history_rows", [])
+    await repo.save_forecast(
+        series_name=series_name,
+        horizon=12,
+        model_used=result["model_used"],
+        result=result,
+        region=region,
+    )
+    if history_rows:
+        import asyncio
+        asyncio.create_task(_bulk_upsert_background(history_rows))
+
+    return result.get("forecast", [])
+
+
+@router.get("/series/{series_name}/recommendation")
+async def get_series_recommendation(
+    series_name: str,
+    response: Response,
+    db: DbSession,
+    region: str = "national",
+    _: dict = Depends(get_current_user),
+) -> dict:
+    """Return a buy/sell recommendation based on the latest 12-month forecast.
+
+    Always uses a fresh forecast (future dates present). If the cached forecast
+    is stale (all dates in the past) or missing, the pipeline is re-run.
+    Sets ``X-Cache: HIT`` or ``MISS`` response header accordingly.
+    """
+    _check_series(series_name)
+
+    repo = MarketPriceRepository(db)
+    record = await repo.get_latest_forecast(series_name, region)
+    cache_status = "HIT"
+
+    if record is not None:
+        data = json.loads(record.result_json)
+        forecast_list = data.get("forecast", [])
+        if _is_forecast_stale(forecast_list):
+            record = None  # treat as missing — will re-run below
+
+    if record is None:
+        cache_status = "MISS"
+        forecast_list = await _run_and_save_forecast(series_name, region, repo)
+    else:
+        data = json.loads(record.result_json)
+        forecast_list = data.get("forecast", [])
+
+    unit = _SERIES_METADATA.get(series_name, {}).get("unit", "TND")
+    recommendation = generate_recommendation(forecast_list, series_name, unit)
+
+    if recommendation is None:
+        raise HTTPException(status_code=422, detail="No forecast data available to generate a recommendation.")
+
+    response.headers["X-Cache"] = cache_status
+    return recommendation
 
 
 # ---------------------------------------------------------------------------

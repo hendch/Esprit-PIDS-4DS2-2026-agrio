@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { marketPricesApi } from "./api";
-import type { ForecastResponse, PricePoint, SeriesInfo } from "./types";
+import type { ForecastResponse, PricePoint, Recommendation, SeriesInfo } from "./types";
 
 interface MarketPricesState {
   // Series list
@@ -20,11 +20,16 @@ interface MarketPricesState {
   forecastLoading: boolean;
   forecastError: string | null;
 
+  // Recommendation
+  recommendation: Recommendation | null;
+  recommendationLoading: boolean;
+
   // Actions
   fetchSeries: () => Promise<void>;
   setSelectedSeries: (name: string) => void;
   fetchHistory: (seriesName: string, start?: string) => Promise<void>;
   fetchForecast: (seriesName: string, horizon?: number, forceRefresh?: boolean, region?: string) => Promise<void>;
+  fetchRecommendation: (seriesName: string, region?: string) => Promise<void>;
 }
 
 export const useMarketPricesStore = create<MarketPricesState>((set) => ({
@@ -41,6 +46,9 @@ export const useMarketPricesStore = create<MarketPricesState>((set) => ({
   forecastLoading: false,
   forecastError: null,
 
+  recommendation: null,
+  recommendationLoading: false,
+
   fetchSeries: async () => {
     set({ seriesLoading: true, seriesError: null });
     try {
@@ -55,7 +63,7 @@ export const useMarketPricesStore = create<MarketPricesState>((set) => ({
   },
 
   setSelectedSeries: (name: string) => {
-    set({ selectedSeries: name, history: [], forecasts: {} });
+    set({ selectedSeries: name, history: [], forecasts: {}, recommendation: null, recommendationLoading: false });
   },
 
   fetchHistory: async (seriesName: string, start = "2020-01") => {
@@ -68,6 +76,18 @@ export const useMarketPricesStore = create<MarketPricesState>((set) => ({
         historyError: err?.message ?? "Failed to load history",
         historyLoading: false,
       });
+    }
+  },
+
+  fetchRecommendation: async (seriesName: string, region = "national") => {
+    set({ recommendationLoading: true, recommendation: null });
+    try {
+      const rec = await marketPricesApi.getRecommendation(seriesName, region);
+      set({ recommendation: rec });
+    } catch (e) {
+      console.error('Recommendation error:', e);
+    } finally {
+      set({ recommendationLoading: false });
     }
   },
 

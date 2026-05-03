@@ -69,6 +69,27 @@ export interface HistoryParams {
   region?: string;  // national | nord | sahel | centre_et_sud
 }
 
+export interface MonthRecommendation {
+  date: string;
+  month_label: string;
+  forecast_price: number;
+  lower_95: number;
+  upper_95: number;
+  pct_above_current?: number;
+  pct_below_current?: number;
+}
+
+export interface Recommendation {
+  series_name: string;
+  unit: string;
+  action: 'wait' | 'neutral';
+  best_month: MonthRecommendation;
+  worst_month: MonthRecommendation;
+  sell_advice: string;
+  avoid_advice: string | null;
+  generated_from: string;
+}
+
 export const SERIES_DISPLAY: Record<string, { label: string; category: 'livestock' | 'fodder' }> = {
   brebis_suitees:   { label: 'Brebis suitées',  category: 'livestock' },
   genisses_pleines: { label: 'Génisses pleines', category: 'livestock' },

@@ -160,6 +160,11 @@ class LivestockService:
                 f"Valid options: {VALID_EVENT_TYPES}"
             )
         event = await repo.create_health_event(animal_id, data)
+
+        if data.get("event_type") == "vaccination":
+            from app.modules.notification.repository import resolve_vaccination_reminder
+            await resolve_vaccination_reminder(db, animal_id)
+
         return _event_to_dict(event)
 
     @staticmethod
@@ -340,6 +345,88 @@ class LivestockService:
             "gross_pnl": round(gross_pnl, 2) if gross_pnl is not None else None,
             "net_pnl": round(net_pnl, 2) if net_pnl is not None else None,
             "currency": "TND",
+        }
+
+    @staticmethod
+    async def get_herd_stats(db: AsyncSession, farm_id: uuid.UUID) -> dict:
+        from datetime import date
+        from sqlalchemy import select
+        from app.modules.market_prices.db_models import MarketPriceHistory
+
+        repo = LivestockRepository(db)
+        animals = await repo.get_animals(farm_id, skip=0, limit=1000)
+
+        if not animals:
+            return {
+                "total_animals": 0,
+                "total_herd_value": 0,
+                "avg_age_months": None,
+                "due_vaccination": 0,
+                "by_type": {},
+                "by_status": {},
+            }
+
+        unique_series = set(
+            _TYPE_TO_SERIES[a.animal_type]
+            for a in animals
+            if a.animal_type in _TYPE_TO_SERIES
+        )
+
+        series_prices: dict[str, float] = {}
+        for series_name in unique_series:
+            result = await db.execute(
+                select(MarketPriceHistory)
+                .where(MarketPriceHistory.series_name == series_name)
+                .where(MarketPriceHistory.region == "national")
+                .order_by(MarketPriceHistory.price_date.desc())
+                .limit(1)
+            )
+            row = result.scalar_one_or_none()
+            if row:
+                series_prices[series_name] = row.price
+
+        total_herd_value = 0.0
+        for animal in animals:
+            series = _TYPE_TO_SERIES.get(animal.animal_type)
+            if series and series in series_prices:
+                total_herd_value += series_prices[series]
+
+        today = date.today()
+        ages = []
+        for a in animals:
+            if a.birth_date:
+                age = (today.year - a.birth_date.year) * 12 + (today.month - a.birth_date.month)
+                ages.append(age)
+        avg_age_months = round(sum(ages) / len(ages)) if ages else None
+
+        due_vaccination = 0
+        for animal in animals:
+            events = await repo.get_health_events(animal.id)
+            vaccinations = [e for e in events if e.event_type == "vaccination"]
+            if not vaccinations:
+                due_vaccination += 1
+            else:
+                last_vax = max(vaccinations, key=lambda e: e.event_date)
+                months_since = (
+                    (today.year - last_vax.event_date.year) * 12
+                    + (today.month - last_vax.event_date.month)
+                )
+                if months_since >= 12:
+                    due_vaccination += 1
+
+        by_type: dict[str, int] = {}
+        by_status: dict[str, int] = {}
+        for a in animals:
+            by_type[a.animal_type] = by_type.get(a.animal_type, 0) + 1
+            by_status[a.status] = by_status.get(a.status, 0) + 1
+
+        return {
+            "total_animals": len(animals),
+            "total_herd_value": round(total_herd_value, 0),
+            "avg_age_months": avg_age_months,
+            "due_vaccination": due_vaccination,
+            "by_type": by_type,
+            "by_status": by_status,
         }
 
     @staticmethod

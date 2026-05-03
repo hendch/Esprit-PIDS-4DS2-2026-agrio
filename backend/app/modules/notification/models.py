@@ -30,3 +30,16 @@ class PriceAlert(Base, TimestampMixin):
     threshold: Mapped[float] = mapped_column(Float)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_triggered_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+
+class VaccinationReminder(Base, TimestampMixin):
+    __tablename__ = "vaccination_reminders"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    animal_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("animals.id"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    farm_id: Mapped[uuid.UUID] = mapped_column(index=True)
+    last_reminded_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    is_resolved: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    __table_args__ = (UniqueConstraint("animal_id", name="uq_vaccination_reminder_animal"),)

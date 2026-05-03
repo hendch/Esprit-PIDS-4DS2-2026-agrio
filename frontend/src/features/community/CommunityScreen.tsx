@@ -390,9 +390,12 @@ export function CommunityScreen() {
           style={[styles.chip, activeCategory === null && styles.chipActive]}
           onPress={() => store.setCategory(null)}
         >
-          <Text style={[styles.chipText, activeCategory === null && styles.chipTextActive]}>
-            All 🌍
-          </Text>
+          <View style={styles.chipInner}>
+            <Text style={styles.chipEmoji}>🌍</Text>
+            <Text style={[styles.chipText, activeCategory === null && styles.chipTextActive]}>
+              {' '}All
+            </Text>
+          </View>
         </Pressable>
         {displayCategories.map((cat) => (
           <Pressable
@@ -400,9 +403,12 @@ export function CommunityScreen() {
             style={[styles.chip, activeCategory === cat.key && styles.chipActive]}
             onPress={() => store.setCategory(cat.key)}
           >
-            <Text style={[styles.chipText, activeCategory === cat.key && styles.chipTextActive]}>
-              {cat.emoji} {cat.label}
-            </Text>
+            <View style={styles.chipInner}>
+              <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+              <Text style={[styles.chipText, activeCategory === cat.key && styles.chipTextActive]}>
+                {' '}{cat.label}
+              </Text>
+            </View>
           </Pressable>
         ))}
       </ScrollView>
@@ -585,9 +591,12 @@ export function CommunityScreen() {
                 style={[styles.chip, postCategory === cat.key && styles.chipActive]}
                 onPress={() => setPostCategory(cat.key)}
               >
-                <Text style={[styles.chipText, postCategory === cat.key && styles.chipTextActive]}>
-                  {cat.emoji} {cat.label}
-                </Text>
+                <View style={styles.chipInner}>
+                  <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+                  <Text style={[styles.chipText, postCategory === cat.key && styles.chipTextActive]}>
+                    {' '}{cat.label}
+                  </Text>
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -679,11 +688,19 @@ const styles = StyleSheet.create({
   composeBtnText: { fontSize: 22 },
 
   // category filter bar
-  filterBar: { maxHeight: 52 },
-  filterBarContent: { paddingHorizontal: 16, paddingVertical: 8, alignItems: 'center' },
+  filterBar: { flexShrink: 0 },
+  filterBarContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: '#DDD',
@@ -691,7 +708,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
   },
   chipActive: { backgroundColor: GREEN, borderColor: GREEN },
-  chipText: { fontSize: 13, color: '#555' },
+  chipInner: { flexDirection: 'row', alignItems: 'center' },
+  chipEmoji: { fontSize: 13, lineHeight: 18 },
+  chipText: { fontSize: 13, color: '#555', lineHeight: 18 },
   chipTextActive: { color: '#FFF', fontWeight: '600' },
 
   // post card
@@ -875,8 +894,8 @@ const styles = StyleSheet.create({
   modalTitleText: { fontSize: 18, fontWeight: '700', color: '#2C2C2C' },
   modalCloseText: { fontSize: 20, color: '#666', paddingHorizontal: 4 },
   fieldLabel: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 8 },
-  modalChipScroll: { maxHeight: 48, marginBottom: 16 },
-  modalChipRow: { alignItems: 'center', paddingRight: 8 },
+  modalChipScroll: { marginBottom: 16 },
+  modalChipRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 8, paddingVertical: 4 },
 
   contentInput: {
     height: 120,

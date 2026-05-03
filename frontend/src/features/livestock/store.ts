@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { livestockApi } from './api';
-import type { Animal, AnimalCreate, AnimalPnL, HealthEvent, MarketPrice } from './types';
+import type { Animal, AnimalCreate, AnimalPnL, HealthEvent, HerdStats, MarketPrice } from './types';
 
 interface LivestockState {
   farmId: string | null;
@@ -10,6 +10,8 @@ interface LivestockState {
   marketPrice: MarketPrice | null;
   pnl: AnimalPnL | null;
   pnlLoading: boolean;
+  herdStats: HerdStats | null;
+  statsLoading: boolean;
   loading: boolean;
   submitting: boolean;
   error: string | null;
@@ -22,6 +24,7 @@ interface LivestockState {
   fetchHealthEvents: (id: string) => Promise<void>;
   fetchMarketPrice: (id: string) => Promise<void>;
   fetchPnL: (animal_id: string, farm_id: string) => Promise<void>;
+  fetchHerdStats: (farm_id: string) => Promise<void>;
   addAnimal: (data: AnimalCreate) => Promise<void>;
   editAnimal: (id: string, data: Partial<AnimalCreate>) => Promise<void>;
   removeAnimal: (id: string) => Promise<void>;
@@ -38,6 +41,8 @@ export const useLivestockStore = create<LivestockState>((set, get) => ({
   marketPrice: null,
   pnl: null,
   pnlLoading: false,
+  herdStats: null,
+  statsLoading: false,
   loading: false,
   submitting: false,
   error: null,
@@ -111,6 +116,16 @@ export const useLivestockStore = create<LivestockState>((set, get) => ({
       set({ pnl: data, pnlLoading: false });
     } catch {
       set({ pnl: null, pnlLoading: false });
+    }
+  },
+
+  fetchHerdStats: async (farm_id) => {
+    set({ statsLoading: true });
+    try {
+      const stats = await livestockApi.getHerdStats(farm_id);
+      set({ herdStats: stats });
+    } finally {
+      set({ statsLoading: false });
     }
   },
 

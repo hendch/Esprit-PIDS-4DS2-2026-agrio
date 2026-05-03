@@ -4,8 +4,10 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from app.settings import settings
 
@@ -14,22 +16,35 @@ logger = logging.getLogger(__name__)
 
 async def _alert_checker_loop() -> None:
     from app.modules.notification.alert_checker import PriceAlertChecker
+    from app.modules.notification.vaccination_checker import VaccinationChecker
     from app.persistence.db import AsyncSessionLocal
 
-    checker = PriceAlertChecker()
+    price_checker = PriceAlertChecker()
+    vax_checker = VaccinationChecker()
+
     while True:
         try:
             async with AsyncSessionLocal() as db:
-                result = await checker.check_all(db)
-                if result["triggered"] > 0:
+                price_result = await price_checker.check_all(db)
+                if price_result["triggered"] > 0:
                     logging.info(
                         "[AlertChecker] %d alert(s) fired, %d checked, %d errors",
-                        result["triggered"],
-                        result["checked"],
-                        result["errors"],
+                        price_result["triggered"],
+                        price_result["checked"],
+                        price_result["errors"],
+                    )
+
+            async with AsyncSessionLocal() as db:
+                vax_result = await vax_checker.check_all(db)
+                if vax_result["reminded"] > 0:
+                    logging.info(
+                        "[VaxChecker] %d vaccination reminder(s) sent, %d checked, %d errors",
+                        vax_result["reminded"],
+                        vax_result["checked"],
+                        vax_result["errors"],
                     )
         except Exception as e:
-            logging.error("[AlertChecker] loop error: %s", e)
+            logging.error("[CheckerLoop] error: %s", e)
         await asyncio.sleep(3600)
 
 
@@ -101,6 +116,11 @@ def create_app() -> FastAPI:
     )
     _register_middleware(application)
     _register_routers(application)
+
+    upload_dir = Path("./media_uploads")
+    upload_dir.mkdir(exist_ok=True)
+    application.mount("/media_uploads", StaticFiles(directory=upload_dir), name="media_uploads")
+
     return application
 
 
@@ -129,6 +149,7 @@ def _register_routers(application: FastAPI) -> None:
     from app.api.v1.market_prices.routes import router as market_prices_router
     from app.api.v1.notifications import router as notifications_router
     from app.api.v1.community.routes import router as community_router
+    from app.api.v1.media.routes import router as media_router
     from app.api.v1.produce_prices.routes import router as produce_prices_router
     from app.api.v1.satellite.routes import router as satellite_router
 
@@ -166,6 +187,11 @@ def _register_routers(application: FastAPI) -> None:
         community_router,
         prefix=f"{prefix}/community",
         tags=["Community"],
+    )
+    application.include_router(
+        media_router,
+        prefix=f"{prefix}/media",
+        tags=["media"],
     )
     application.include_router(
         produce_prices_router,

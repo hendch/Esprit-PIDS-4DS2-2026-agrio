@@ -71,6 +71,15 @@ export interface AnimalPnL {
   currency: string;
 }
 
+export interface HerdStats {
+  total_animals: number;
+  total_herd_value: number;
+  avg_age_months: number | null;
+  due_vaccination: number;
+  by_type: Record<string, number>;
+  by_status: Record<string, number>;
+}
+
 export const ANIMAL_TYPES = [
   { value: 'bovin',     label: 'Bovin',     emoji: '🐄' },
   { value: 'vache',     label: 'Vache',     emoji: '🐄' },

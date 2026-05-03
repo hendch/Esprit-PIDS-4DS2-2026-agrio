@@ -11,7 +11,7 @@ from starlette.responses import Response
 from app.settings import settings
 
 # Only these paths skip JWT. Do not use a broad "/auth/" match — e.g. `/api/v1/auth/me` must verify Bearer.
-_SKIP_PREFIXES = ("/health", "/docs", "/openapi", "/redoc")
+_SKIP_PREFIXES = ("/health", "/docs", "/openapi", "/redoc", "/media_uploads")
 _PUBLIC_AUTH_PATHS = frozenset(
     {
         "/api/v1/auth/login",

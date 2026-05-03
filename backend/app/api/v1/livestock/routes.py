@@ -53,6 +53,15 @@ async def create_animal(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+@router.get("/animals/stats")
+async def get_herd_stats(
+    farm_id: uuid.UUID,
+    db: DbSession,
+    _: dict = Depends(get_current_user),
+) -> dict:
+    return await LivestockService.get_herd_stats(db, farm_id)
+
+
 @router.get("/animals/{animal_id}", response_model=AnimalResponse)
 async def get_animal(
     animal_id: uuid.UUID,

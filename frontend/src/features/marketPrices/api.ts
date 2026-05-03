@@ -3,6 +3,7 @@ import type {
   ForecastResponse,
   HistoryParams,
   PricePoint,
+  Recommendation,
   SeriesInfo,
 } from "./types";
 import { httpClient } from "../../core/api/httpClient";
@@ -45,6 +46,15 @@ export const marketPricesApi = {
   /** GET /forecast/{series_name}/scenarios */
   getScenarios: async (seriesName: string) => {
     const response = await httpClient.get(`${BASE}/forecast/${seriesName}/scenarios`);
+    return response.data;
+  },
+
+  /** GET /series/{series_name}/recommendation */
+  getRecommendation: async (seriesName: string, region = 'national'): Promise<Recommendation> => {
+    const response = await httpClient.get<Recommendation>(
+      `${BASE}/series/${seriesName}/recommendation`,
+      { params: { region } }
+    );
     return response.data;
   },
 };
