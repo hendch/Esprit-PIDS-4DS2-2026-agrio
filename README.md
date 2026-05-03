@@ -101,10 +101,15 @@ python -m venv .venv
 # source .venv/bin/activate
 
 pip install -e ".[dev]"
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 The API runs at `http://localhost:8000`. Interactive docs at `http://localhost:8000/docs`.
+
+> **Heads up:** the price-prediction modules pull in heavy ML deps (`prophet`, `lightgbm`, `statsmodels`, `scikit-learn`, `pyarrow`). Expect a multi-minute install on first run.
+
+> **Migrations:** the project uses Alembic. After `pip install`, run `alembic upgrade head` to create all tables (auth, livestock, community, market/produce price forecasts, push tokens, etc.). Re-run after every `git pull` that adds files under `backend/app/persistence/migrations/versions/`.
 
 ### 2.4) Verify backend is working
 
@@ -189,9 +194,11 @@ The irrigation system uses an ESP32 that communicates with the backend via MQTT.
 | Irrigation | Water tab | `/api/v1/irrigation/` |
 | Disease Detection | Crop tab | On-device TFLite model |
 | Satellite/Land | Land tab | `/api/v1/satellite/` |
-| Livestock | Livestock tab | `/api/v1/livestock/` |
-| Community | Community tab | - |
-| Alerts | Alerts tab | - |
+| Livestock (P&L, herd stats, vaccination reminders) | Livestock tab | `/api/v1/livestock/` |
+| Market Prices (livestock SARIMA forecasts) | Market Prices tab | `/api/v1/market-prices/` |
+| Produce Prices (fruits/vegetables Prophet + LightGBM) | Produce Prices tab | `/api/v1/produce-prices/` |
+| Community (posts, comments) | Community tab | `/api/v1/community/` |
+| Alerts (price alerts, vaccination reminders, push) | Alerts tab | `/api/v1/notifications/` |
 
 ---
 
