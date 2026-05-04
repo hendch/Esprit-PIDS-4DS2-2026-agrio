@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 import time
 from datetime import datetime
 
@@ -30,7 +31,24 @@ class MqttSensorProvider:
 
     def _on_message(self, client: mqtt.Client, userdata: object, msg: mqtt.MQTTMessage) -> None:
         try:
-            self._latest_moisture = float(msg.payload.decode())
+            raw_payload = msg.payload.decode().strip()
+            try:
+                decoded = json.loads(raw_payload)
+            except json.JSONDecodeError:
+                decoded = raw_payload
+
+            if isinstance(decoded, dict):
+                moisture_value = (
+                    decoded.get("moisture_percent")
+                    or decoded.get("soil_moisture_pct")
+                    or decoded.get("soil_moisture")
+                    or decoded.get("moisture")
+                    or decoded.get("value")
+                )
+            else:
+                moisture_value = decoded
+
+            self._latest_moisture = float(moisture_value)
             self._received_mqtt_payload = True
             current_time = datetime.now().strftime("%H:%M:%S")
             self._moisture_history.append({"time": current_time, "value": self._latest_moisture})
@@ -38,7 +56,7 @@ class MqttSensorProvider:
                 self._moisture_history.pop(0)
 
             logger.info("MQTT moisture reading: %.1f%%", self._latest_moisture)
-        except (ValueError, UnicodeDecodeError):
+        except (TypeError, ValueError, UnicodeDecodeError):
             logger.warning("Could not parse MQTT payload: %s", msg.payload)
 
     def _on_connect(

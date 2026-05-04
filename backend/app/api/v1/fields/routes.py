@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.di import get_db
@@ -13,6 +14,8 @@ from app.middleware.auth import CurrentUser
 from app.modules.farms.models import Field
 from app.modules.farms.repository import FarmRepository
 from app.modules.farms.service import FarmService
+from app.modules.irrigation.models import FieldMoistureSensor, FieldTask
+from app.modules.irrigation.repository import IrrigationRepository
 from app.modules.ml_crop.predictor import yield_predictor
 from app.modules.weather.open_meteo_client import OpenMeteoWeatherProvider
 from app.modules.ml_crop.optimizer_predictor import optimizer_predictor
@@ -31,6 +34,10 @@ from .schemas import (
     FieldWeatherContextResponse,
     FieldOptimizeRequest,
     FieldOptimizeResponse,
+    FieldMoistureSensorCreate,
+    FieldMoistureSensorResponse,
+    FieldTaskResponse,
+    FieldTaskUpdate,
 
 )
 
@@ -58,6 +65,66 @@ def _to_response(field: Field) -> FieldResponse:
         irrigation_method=field.irrigation_method,
         field_notes=field.field_notes,
     )
+
+
+def _sensor_to_response(sensor: FieldMoistureSensor) -> FieldMoistureSensorResponse:
+    return FieldMoistureSensorResponse(
+        id=str(sensor.id),
+        field_id=str(sensor.field_id),
+        name=sensor.name,
+        latitude=sensor.latitude,
+        longitude=sensor.longitude,
+        depth_cm=sensor.depth_cm,
+        simulated_moisture_pct=sensor.simulated_moisture_pct,
+        notes=sensor.notes,
+        created_at=sensor.created_at,
+        updated_at=sensor.updated_at,
+    )
+
+
+def _task_to_response(task: FieldTask) -> FieldTaskResponse:
+    return FieldTaskResponse(
+        id=str(task.id),
+        field_id=str(task.field_id),
+        task_type=task.task_type,
+        title=task.title,
+        note=task.note,
+        completed=task.completed,
+        source=task.source,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
+
+
+def _default_field_tasks(field: Field, autonomous: bool) -> list[dict[str, str]]:
+    irrigation_title = (
+        "Irrigate field (autonomous irrigation will run automatically)"
+        if field.irrigated and autonomous
+        else "Irrigate field"
+    )
+    irrigation_note = (
+        "Autonomous irrigation is enabled, so this is tracked as an automatic action."
+        if field.irrigated and autonomous
+        else "Tick this after manually irrigating the field."
+    )
+
+    return [
+        {
+            "task_type": "fertilizer",
+            "title": "Apply fertilizer",
+            "note": "Use the field fertilizer recommendation before ticking this task.",
+        },
+        {
+            "task_type": "irrigation",
+            "title": irrigation_title,
+            "note": irrigation_note,
+        },
+        {
+            "task_type": "harvest",
+            "title": "Harvest crop",
+            "note": "Tick this when harvest for this field is complete.",
+        },
+    ]
 
 
 async def _current_farm_id(current_user: dict, service: FarmService) -> uuid.UUID:
@@ -444,9 +511,154 @@ async def delete_field(
     field_id: str,
     current_user: dict = CurrentUser,
     service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
 ) -> None:
     field = await _get_owned_field(field_id, current_user, service)
+    await db.execute(delete(FieldMoistureSensor).where(FieldMoistureSensor.field_id == field.id))
+    await db.execute(delete(FieldTask).where(FieldTask.field_id == field.id))
+    await db.commit()
     await service.delete_field(field.id)
+
+
+@router.get("/{field_id}/moisture-sensors", response_model=list[FieldMoistureSensorResponse])
+async def list_field_moisture_sensors(
+    field_id: str,
+    current_user: dict = CurrentUser,
+    service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
+) -> list[FieldMoistureSensorResponse]:
+    field = await _get_owned_field(field_id, current_user, service)
+    result = await db.execute(
+        select(FieldMoistureSensor)
+        .where(FieldMoistureSensor.field_id == field.id)
+        .order_by(FieldMoistureSensor.created_at.desc())
+    )
+    return [_sensor_to_response(sensor) for sensor in result.scalars().all()]
+
+
+@router.post("/{field_id}/moisture-sensors", response_model=FieldMoistureSensorResponse, status_code=201)
+async def create_field_moisture_sensor(
+    field_id: str,
+    body: FieldMoistureSensorCreate,
+    current_user: dict = CurrentUser,
+    service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
+) -> FieldMoistureSensorResponse:
+    field = await _get_owned_field(field_id, current_user, service)
+    sensor = FieldMoistureSensor(
+        field_id=field.id,
+        name=body.name.strip(),
+        latitude=body.latitude,
+        longitude=body.longitude,
+        depth_cm=body.depth_cm,
+        simulated_moisture_pct=body.simulated_moisture_pct,
+        notes=body.notes.strip() if body.notes else None,
+    )
+    db.add(sensor)
+    await db.commit()
+    await db.refresh(sensor)
+    return _sensor_to_response(sensor)
+
+
+@router.delete("/{field_id}/moisture-sensors/{sensor_id}", status_code=204)
+async def delete_field_moisture_sensor(
+    field_id: str,
+    sensor_id: str,
+    current_user: dict = CurrentUser,
+    service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    field = await _get_owned_field(field_id, current_user, service)
+    try:
+        parsed_sensor_id = uuid.UUID(sensor_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Sensor not found") from exc
+
+    result = await db.execute(
+        delete(FieldMoistureSensor)
+        .where(FieldMoistureSensor.id == parsed_sensor_id)
+        .where(FieldMoistureSensor.field_id == field.id)
+        .returning(FieldMoistureSensor.id)
+    )
+    deleted_id = result.scalar_one_or_none()
+    await db.commit()
+    if deleted_id is None:
+        raise HTTPException(status_code=404, detail="Sensor not found")
+
+
+@router.get("/{field_id}/tasks", response_model=list[FieldTaskResponse])
+async def list_field_tasks(
+    field_id: str,
+    current_user: dict = CurrentUser,
+    service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
+) -> list[FieldTaskResponse]:
+    field = await _get_owned_field(field_id, current_user, service)
+    autonomous = await IrrigationRepository(db).get_autonomous_state()
+
+    existing_result = await db.execute(select(FieldTask).where(FieldTask.field_id == field.id))
+    existing = list(existing_result.scalars().all())
+    existing_types = {task.task_type for task in existing}
+
+    for task_data in _default_field_tasks(field, autonomous):
+        if task_data["task_type"] not in existing_types:
+            task = FieldTask(
+                field_id=field.id,
+                task_type=task_data["task_type"],
+                title=task_data["title"],
+                note=task_data["note"],
+                completed=False,
+                source="system",
+            )
+            db.add(task)
+            existing.append(task)
+
+    await db.commit()
+
+    result = await db.execute(
+        select(FieldTask)
+        .where(FieldTask.field_id == field.id)
+        .order_by(FieldTask.created_at.asc())
+    )
+    tasks = list(result.scalars().all())
+
+    if field.irrigated and autonomous:
+        for task in tasks:
+            if task.task_type == "irrigation" and not task.completed:
+                task.title = "Irrigate field (autonomous irrigation will run automatically)"
+                task.note = "Autonomous irrigation is enabled, so this is tracked as an automatic action."
+
+    return [_task_to_response(task) for task in tasks]
+
+
+@router.patch("/{field_id}/tasks/{task_id}", response_model=FieldTaskResponse)
+async def update_field_task(
+    field_id: str,
+    task_id: str,
+    body: FieldTaskUpdate,
+    current_user: dict = CurrentUser,
+    service: FarmService = Depends(get_farm_service),
+    db: AsyncSession = Depends(get_db),
+) -> FieldTaskResponse:
+    field = await _get_owned_field(field_id, current_user, service)
+    try:
+        parsed_task_id = uuid.UUID(task_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Task not found") from exc
+
+    result = await db.execute(
+        select(FieldTask)
+        .where(FieldTask.id == parsed_task_id)
+        .where(FieldTask.field_id == field.id)
+    )
+    task = result.scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task.completed = body.completed
+    await db.commit()
+    await db.refresh(task)
+    return _task_to_response(task)
 
 
 @router.post("/{field_id}/predict-yield", response_model=FieldPredictionResponse)

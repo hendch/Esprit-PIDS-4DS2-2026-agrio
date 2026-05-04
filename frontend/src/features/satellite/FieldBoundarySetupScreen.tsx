@@ -20,18 +20,17 @@ import MapView, {
   PROVIDER_GOOGLE,
   Region,
 } from "react-native-maps";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import DateTimePicker, {
-  DateTimePickerEvent,
-} from "@react-native-community/datetimepicker";
 import * as Location from "expo-location";
 
 import { useTheme } from "../../core/theme/useTheme";
 import {
   FieldBoundaryRecord,
+  getFieldBoundary,
   listFieldBoundaries,
   saveFieldBoundary,
+  updateFieldBoundary,
 } from "./fieldBoundaryService";
 import {
   SUPPORTED_CROPS,
@@ -42,6 +41,10 @@ import {
 type LatLng = {
   latitude: number;
   longitude: number;
+};
+
+type RouteParams = {
+  fieldId?: string;
 };
 
 const INITIAL_REGION: Region = {
@@ -74,6 +77,7 @@ const IRRIGATION_METHODS = [
 
 const TAP_MAX_DISTANCE_PX = 12;
 const TAP_MAX_DURATION_MS = 260;
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function computeAreaHa(points: LatLng[]): number {
   if (points.length < 3) return 0;
@@ -209,6 +213,69 @@ function formatDateForDisplay(date: Date | null): string {
   });
 }
 
+function parseApiDate(value?: string): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function sameDate(a: Date | null, b: Date): boolean {
+  return Boolean(
+    a &&
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate(),
+  );
+}
+
+function isAfterToday(date: Date): boolean {
+  return startOfDay(date).getTime() > startOfDay(new Date()).getTime();
+}
+
+function isSameOrAfterCurrentMonth(date: Date): boolean {
+  const today = new Date();
+  return (
+    date.getFullYear() > today.getFullYear() ||
+    (date.getFullYear() === today.getFullYear() && date.getMonth() >= today.getMonth())
+  );
+}
+
+function getCalendarMonthDays(monthDate: Date): Array<Date | null> {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: Array<Date | null> = Array.from({ length: firstDay.getDay() }, () => null);
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(new Date(year, month, day));
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  return cells;
+}
+
+function formatMonthTitle(date: Date): string {
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+}
+
 type PickerItem = {
   label: string;
   value: string;
@@ -304,8 +371,12 @@ function PickerModal({
 
 export function FieldBoundarySetupScreen() {
   const nav = useNavigation<any>();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const params = route.params as RouteParams | undefined;
+  const editingFieldId = params?.fieldId;
+  const isEditMode = Boolean(editingFieldId);
 
   const mapRef = useRef<MapView | null>(null);
   const tapGestureRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
@@ -317,6 +388,7 @@ export function FieldBoundarySetupScreen() {
   const [governorate, setGovernorate] = useState("");
   const [plantingDate, setPlantingDate] = useState<Date | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(startOfDay(new Date()));
   const [irrigated, setIrrigated] = useState(false);
   const [irrigationMethod, setIrrigationMethod] = useState("");
   const [fieldNotes, setFieldNotes] = useState("");
@@ -329,6 +401,7 @@ export function FieldBoundarySetupScreen() {
   const [lockedFields, setLockedFields] = useState<FieldBoundaryRecord[]>([]);
   const [lockedFieldsError, setLockedFieldsError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingEditField, setIsLoadingEditField] = useState(false);
   const [isResolvingGovernorate, setIsResolvingGovernorate] = useState(false);
   const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
 
@@ -339,6 +412,7 @@ export function FieldBoundarySetupScreen() {
     [lockedFields],
   );
   const drawingLine = points.length > 1 ? points : [];
+  const calendarDays = useMemo(() => getCalendarMonthDays(calendarMonth), [calendarMonth]);
 
   useEffect(() => {
     (async () => {
@@ -375,6 +449,55 @@ export function FieldBoundarySetupScreen() {
       isMounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadFieldForEditing() {
+      if (!editingFieldId) {
+        return;
+      }
+
+      try {
+        setIsLoadingEditField(true);
+        const record = await getFieldBoundary(editingFieldId);
+        if (!isMounted) {
+          return;
+        }
+
+        setFieldName(record.name);
+        setCropType(record.cropType || "");
+        setGovernorate(record.governorate || "");
+        setPlantingDate(parseApiDate(record.plantingDate));
+        setIrrigated(record.irrigated);
+        setIrrigationMethod(record.irrigationMethod || "");
+        setFieldNotes(record.fieldNotes || "");
+        setPoints(record.points);
+
+        if (record.centroidLat != null && record.centroidLon != null) {
+          moveMapTo(record.centroidLat, record.centroidLon, 0.02, 0.02);
+        } else if (record.points[0]) {
+          moveMapTo(record.points[0].latitude, record.points[0].longitude, 0.02, 0.02);
+        }
+      } catch (error) {
+        console.error("Failed to load field for editing:", error);
+        if (isMounted) {
+          Alert.alert("Field unavailable", "Could not load this field for editing.");
+          nav.goBack();
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingEditField(false);
+        }
+      }
+    }
+
+    void loadFieldForEditing();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editingFieldId, nav]);
 
   useEffect(() => {
     let isMounted = true;
@@ -420,7 +543,9 @@ export function FieldBoundarySetupScreen() {
   const addCoordinate = (coordinate: LatLng) => {
     const { latitude, longitude } = coordinate;
     const nextPoint = { latitude, longitude };
-    const touchedLockedField = lockedFields.find((field) => isPointInsidePolygon(nextPoint, field.points));
+    const touchedLockedField = lockedFields.find(
+      (field) => field.id !== editingFieldId && isPointInsidePolygon(nextPoint, field.points),
+    );
     if (touchedLockedField) {
       Alert.alert(
         "Field already saved",
@@ -540,11 +665,21 @@ export function FieldBoundarySetupScreen() {
     }
   };
 
-  const onChangeDate = (_event: DateTimePickerEvent, selectedDate?: Date) => {
+  const openDatePicker = () => {
+    setCalendarMonth(startOfDay(plantingDate || new Date()));
+    setShowDatePicker(true);
+  };
+
+  const shiftCalendarMonth = (offset: number) => {
+    setCalendarMonth((current) => {
+      const next = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+      return isSameOrAfterCurrentMonth(next) ? startOfDay(new Date()) : next;
+    });
+  };
+
+  const selectPlantingDate = (date: Date) => {
+    setPlantingDate(startOfDay(date));
     setShowDatePicker(false);
-    if (selectedDate) {
-      setPlantingDate(selectedDate);
-    }
   };
 
   const onSave = async () => {
@@ -571,7 +706,9 @@ export function FieldBoundarySetupScreen() {
       return;
     }
 
-    const overlappingField = lockedFields.find((field) => polygonOverlaps(points, field.points));
+    const overlappingField = lockedFields.find(
+      (field) => field.id !== editingFieldId && polygonOverlaps(points, field.points),
+    );
     if (overlappingField) {
       Alert.alert(
         "Boundary overlaps a saved field",
@@ -583,7 +720,7 @@ export function FieldBoundarySetupScreen() {
     try {
       setIsSaving(true);
 
-      await saveFieldBoundary({
+      const payload = {
         name: fieldName.trim(),
         cropType: normalizeCropName(cropType) || undefined,
         areaHa,
@@ -596,9 +733,20 @@ export function FieldBoundarySetupScreen() {
             ? irrigationMethod.trim()
             : undefined,
         fieldNotes: fieldNotes.trim() || undefined,
-      });
+      };
 
-      Alert.alert("Saved", "Field boundary and profile saved successfully.");
+      if (editingFieldId) {
+        await updateFieldBoundary(editingFieldId, payload);
+      } else {
+        await saveFieldBoundary(payload);
+      }
+
+      Alert.alert(
+        editingFieldId ? "Updated" : "Saved",
+        editingFieldId
+          ? "Field boundary and profile updated successfully."
+          : "Field boundary and profile saved successfully.",
+      );
       nav.goBack();
     } catch (error) {
       console.error("Save failed:", error);
@@ -622,7 +770,7 @@ export function FieldBoundarySetupScreen() {
         <TouchableOpacity onPress={() => nav.goBack()}>
           <Text style={styles.backBtn}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Draw Field Border</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? "Update Field" : "Draw Field Border"}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
@@ -767,21 +915,12 @@ export function FieldBoundarySetupScreen() {
           <Text style={styles.selectorChevron}>▾</Text>
         </Pressable>
 
-        <Pressable style={styles.selector} onPress={() => setShowDatePicker(true)}>
+        <Pressable style={styles.selector} onPress={openDatePicker}>
           <Text style={plantingDate ? styles.selectorValue : styles.selectorPlaceholder}>
             {formatDateForDisplay(plantingDate)}
           </Text>
           <Text style={styles.selectorChevron}>📅</Text>
         </Pressable>
-
-        {showDatePicker ? (
-          <DateTimePicker
-            value={plantingDate || new Date()}
-            mode="date"
-            display="default"
-            onChange={onChangeDate}
-          />
-        ) : null}
 
         <TextInput
           value={governorate}
@@ -820,12 +959,18 @@ export function FieldBoundarySetupScreen() {
         />
 
         <Pressable
-          style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
+          style={[styles.saveBtn, (isSaving || isLoadingEditField) && styles.saveBtnDisabled]}
           onPress={onSave}
-          disabled={isSaving}
+          disabled={isSaving || isLoadingEditField}
         >
           <Text style={styles.saveBtnText}>
-            {isSaving ? "Saving..." : "Save Field Boundary"}
+            {isSaving
+              ? isEditMode
+                ? "Updating..."
+                : "Saving..."
+              : isEditMode
+                ? "Update Field"
+                : "Save Field Boundary"}
           </Text>
         </Pressable>
       </ScrollView>
@@ -846,6 +991,91 @@ export function FieldBoundarySetupScreen() {
         onClose={() => setIrrigationModalVisible(false)}
         onSelect={(value) => setIrrigationMethod(value)}
       />
+
+      <Modal visible={showDatePicker} transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.calendarCard}>
+            <View style={styles.calendarHeader}>
+              <Pressable style={styles.calendarNavBtn} onPress={() => shiftCalendarMonth(-1)}>
+                <Text style={styles.calendarNavText}>{"<"}</Text>
+              </Pressable>
+
+              <Text style={styles.calendarTitle}>{formatMonthTitle(calendarMonth)}</Text>
+
+              <Pressable
+                style={[
+                  styles.calendarNavBtn,
+                  isSameOrAfterCurrentMonth(calendarMonth) && styles.calendarNavBtnDisabled,
+                ]}
+                onPress={() => shiftCalendarMonth(1)}
+                disabled={isSameOrAfterCurrentMonth(calendarMonth)}
+              >
+                <Text style={styles.calendarNavText}>{">"}</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((day) => (
+                <Text key={day} style={styles.weekdayText}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.calendarGrid}>
+              {calendarDays.map((date, index) => {
+                const selected = date ? sameDate(plantingDate, date) : false;
+                const today = date ? sameDate(new Date(), date) : false;
+                const disabled = !date || isAfterToday(date);
+
+                return (
+                  <Pressable
+                    key={date ? date.toISOString() : `empty-${index.toString()}`}
+                    style={[
+                      styles.calendarDay,
+                      selected && styles.calendarDaySelected,
+                      today && !selected && styles.calendarDayToday,
+                      disabled && styles.calendarDayDisabled,
+                    ]}
+                    disabled={disabled}
+                    onPress={() => date && !disabled && selectPlantingDate(date)}
+                  >
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        selected && styles.calendarDayTextSelected,
+                        disabled && styles.calendarDayTextDisabled,
+                      ]}
+                    >
+                      {date ? date.getDate() : ""}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.calendarActions}>
+              <Pressable style={styles.calendarActionBtn} onPress={() => setShowDatePicker(false)}>
+                <Text style={styles.calendarActionText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable style={styles.calendarActionBtn} onPress={() => selectPlantingDate(new Date())}>
+                <Text style={styles.calendarActionText}>Today</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.calendarActionBtn}
+                onPress={() => {
+                  setPlantingDate(null);
+                  setShowDatePicker(false);
+                }}
+              >
+                <Text style={styles.calendarActionText}>Clear</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1125,5 +1355,102 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#777",
     paddingVertical: 14,
+  },
+  calendarCard: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+  calendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  calendarTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#222",
+  },
+  calendarNavBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F3F5F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarNavText: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#2E7D32",
+  },
+  calendarNavBtnDisabled: {
+    opacity: 0.35,
+  },
+  weekdayRow: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+  weekdayText: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#666",
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  calendarDay: {
+    width: "14.2857%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    marginVertical: 2,
+  },
+  calendarDayToday: {
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+  },
+  calendarDaySelected: {
+    backgroundColor: "#2E7D32",
+  },
+  calendarDayDisabled: {
+    opacity: 0.35,
+  },
+  calendarDayText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#222",
+  },
+  calendarDayTextSelected: {
+    color: "#FFF",
+  },
+  calendarDayTextDisabled: {
+    color: "#999",
+  },
+  calendarActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 14,
+  },
+  calendarActionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#D5D5D5",
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  calendarActionText: {
+    color: "#2E7D32",
+    fontWeight: "800",
   },
 });

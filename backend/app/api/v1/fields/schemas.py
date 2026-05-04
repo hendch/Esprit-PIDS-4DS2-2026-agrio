@@ -114,3 +114,41 @@ class FieldOptimizeResponse(BaseModel):
     optimization_priority: str
 
     context: dict[str, Any]
+
+
+class FieldMoistureSensorCreate(BaseModel):
+    name: str = PydanticField(..., min_length=1, max_length=255)
+    latitude: float
+    longitude: float
+    depth_cm: float | None = PydanticField(default=None, ge=0)
+    simulated_moisture_pct: float = PydanticField(default=45.0, ge=0, le=100)
+    notes: str | None = None
+
+
+class FieldMoistureSensorResponse(BaseModel):
+    id: str
+    field_id: str
+    name: str
+    latitude: float
+    longitude: float
+    depth_cm: float | None = None
+    simulated_moisture_pct: float
+    notes: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FieldTaskUpdate(BaseModel):
+    completed: bool
+
+
+class FieldTaskResponse(BaseModel):
+    id: str
+    field_id: str
+    task_type: str
+    title: str
+    note: str | None = None
+    completed: bool
+    source: str
+    created_at: datetime
+    updated_at: datetime

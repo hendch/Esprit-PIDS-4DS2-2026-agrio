@@ -1,0 +1,142 @@
+{
+  "target": "formula",
+  "features": [
+    "crop",
+    "crop_group",
+    "soil_type",
+    "texture",
+    "drainage",
+    "ph",
+    "total_nitrogen",
+    "organic_carbon",
+    "ndvi",
+    "target_yield_t_ha",
+    "area_ha",
+    "fertility_level"
+  ],
+  "feature_names": [
+    "crop",
+    "crop_group",
+    "soil_type",
+    "texture",
+    "drainage",
+    "ph",
+    "total_nitrogen",
+    "organic_carbon",
+    "ndvi",
+    "target_yield_t_ha",
+    "area_ha",
+    "fertility_level"
+  ],
+  "categorical_features": [
+    "crop",
+    "crop_group",
+    "soil_type",
+    "texture",
+    "drainage",
+    "fertility_level"
+  ],
+  "numeric_features": [
+    "ph",
+    "total_nitrogen",
+    "organic_carbon",
+    "ndvi",
+    "target_yield_t_ha",
+    "area_ha"
+  ],
+  "allowed_values": {
+    "crop": [
+      "almonds",
+      "apples",
+      "apricots",
+      "avocados",
+      "barley",
+      "beans",
+      "broad_beans_and_horse_beans",
+      "cabbages",
+      "cantaloupes_and_other_melons",
+      "carrots_and_turnips",
+      "cauliflowers_and_broccoli",
+      "cereals",
+      "cherries",
+      "chick_peas",
+      "chillies_and_peppers",
+      "cucumbers_and_gherkins",
+      "dates",
+      "eggplants_aubergines",
+      "figs",
+      "grapes",
+      "green_garlic",
+      "lemons_and_limes",
+      "lentils",
+      "lettuce_and_chicory",
+      "linseed",
+      "oats",
+      "olives",
+      "onions_and_shallots",
+      "oranges",
+      "other_beans",
+      "other_pulses",
+      "peas",
+      "pistachios",
+      "potatoes",
+      "pumpkins_squash_and_gourds",
+      "rape_or_colza_seed",
+      "seed_cotton_unginned",
+      "sorghum",
+      "spinach",
+      "sugar_beet",
+      "sunflower_seed",
+      "tangerines_mandarins_clementines",
+      "tomatoes",
+      "triticale",
+      "unmanufactured_tobacco",
+      "watermelons",
+      "wheat"
+    ],
+    "crop_group": [
+      "cereal",
+      "citrus",
+      "cucurbit",
+      "fruit_tree",
+      "fruiting_vegetable",
+      "industrial",
+      "leafy_vegetable",
+      "nut_orchard",
+      "oilseed",
+      "pulse",
+      "root_vegetable",
+      "vine"
+    ],
+    "soil_type": [
+      "calcareous",
+      "alluvial",
+      "sandy",
+      "clay",
+      "loamy"
+    ],
+    "texture": [
+      "sandy",
+      "loam",
+      "clay_loam",
+      "clay"
+    ],
+    "drainage": [
+      "poor",
+      "moderate",
+      "good"
+    ],
+    "fertility_level": [
+      "low",
+      "medium",
+      "high"
+    ]
+  },
+  "model_type": "RandomForestClassifier",
+  "artifact_format": {
+    "model": "sklearn Pipeline",
+    "features": "ordered input feature list",
+    "feature_names": "ordered input feature list",
+    "target": "formula"
+  }
+}

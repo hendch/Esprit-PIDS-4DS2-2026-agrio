@@ -36,12 +36,102 @@ CROP_BASE_NEEDS_KG_HA = {
     "olive": {"N": 60.0, "P": 25.0, "K": 70.0},
 }
 
+CROP_GROUP_BASE_NEEDS_KG_HA = {
+    "cereal": {"N": 90.0, "P": 40.0, "K": 35.0},
+    "pulse": {"N": 45.0, "P": 35.0, "K": 30.0},
+    "oilseed": {"N": 80.0, "P": 40.0, "K": 60.0},
+    "fruit_tree": {"N": 75.0, "P": 35.0, "K": 95.0},
+    "nut_orchard": {"N": 65.0, "P": 30.0, "K": 75.0},
+    "citrus": {"N": 120.0, "P": 50.0, "K": 120.0},
+    "vine": {"N": 80.0, "P": 35.0, "K": 100.0},
+    "fruiting_vegetable": {"N": 130.0, "P": 60.0, "K": 150.0},
+    "leafy_vegetable": {"N": 100.0, "P": 45.0, "K": 120.0},
+    "root_vegetable": {"N": 110.0, "P": 60.0, "K": 140.0},
+    "cucurbit": {"N": 110.0, "P": 55.0, "K": 140.0},
+    "industrial": {"N": 90.0, "P": 45.0, "K": 80.0},
+    "aromatic": {"N": 60.0, "P": 30.0, "K": 50.0},
+    "forage": {"N": 60.0, "P": 35.0, "K": 45.0},
+}
+
 
 CROP_ALIASES = {
     "tomatoes": "tomato",
     "potatoes": "potato",
     "olives": "olive",
     "cereals": "wheat",
+}
+
+CROP_GROUPS = {
+    "wheat": "cereal",
+    "barley": "cereal",
+    "cereals": "cereal",
+    "oats": "cereal",
+    "sorghum": "cereal",
+    "triticale": "cereal",
+    "beans": "pulse",
+    "broad_beans_and_horse_beans": "pulse",
+    "chick_peas": "pulse",
+    "lentils": "pulse",
+    "peas": "pulse",
+    "other_beans": "pulse",
+    "other_pulses": "pulse",
+    "vetches": "forage",
+    "tomato": "fruiting_vegetable",
+    "tomatoes": "fruiting_vegetable",
+    "chillies_and_peppers": "fruiting_vegetable",
+    "eggplants_aubergines": "fruiting_vegetable",
+    "other_vegetables_fresh": "fruiting_vegetable",
+    "potato": "root_vegetable",
+    "potatoes": "root_vegetable",
+    "carrots_and_turnips": "root_vegetable",
+    "onions_and_shallots": "root_vegetable",
+    "green_garlic": "root_vegetable",
+    "sugar_beet": "root_vegetable",
+    "cabbages": "leafy_vegetable",
+    "cauliflowers_and_broccoli": "leafy_vegetable",
+    "lettuce_and_chicory": "leafy_vegetable",
+    "spinach": "leafy_vegetable",
+    "artichokes": "leafy_vegetable",
+    "cantaloupes_and_other_melons": "cucurbit",
+    "cucumbers_and_gherkins": "cucurbit",
+    "pumpkins_squash_and_gourds": "cucurbit",
+    "watermelons": "cucurbit",
+    "olive": "fruit_tree",
+    "olives": "fruit_tree",
+    "apples": "fruit_tree",
+    "apricots": "fruit_tree",
+    "avocados": "fruit_tree",
+    "cherries": "fruit_tree",
+    "dates": "fruit_tree",
+    "figs": "fruit_tree",
+    "kiwi_fruit": "fruit_tree",
+    "peaches_and_nectarines": "fruit_tree",
+    "pears": "fruit_tree",
+    "plums_and_sloes": "fruit_tree",
+    "quinces": "fruit_tree",
+    "other_fruits": "fruit_tree",
+    "other_stone_fruits": "fruit_tree",
+    "other_tropical_fruits": "fruit_tree",
+    "other_berries_and_fruits": "fruit_tree",
+    "grapes": "vine",
+    "oranges": "citrus",
+    "lemons_and_limes": "citrus",
+    "pomelos_and_grapefruits": "citrus",
+    "tangerines_mandarins_clementines": "citrus",
+    "other_citrus_fruit": "citrus",
+    "almonds": "nut_orchard",
+    "hazelnuts": "nut_orchard",
+    "pistachios": "nut_orchard",
+    "locust_beans_carobs": "nut_orchard",
+    "other_nuts_excluding_wild_edible_nuts_and_groundnuts": "nut_orchard",
+    "linseed": "oilseed",
+    "rape_or_colza_seed": "oilseed",
+    "sunflower_seed": "oilseed",
+    "seed_cotton_unginned": "industrial",
+    "unmanufactured_tobacco": "industrial",
+    "pyrethrum_dried_flowers": "industrial",
+    "spices_mixed": "aromatic",
+    "other_stimulant_spice_and_aromatic_crops": "aromatic",
 }
 
 
@@ -72,6 +162,10 @@ def _parse_npk_formula(formula: str) -> tuple[float, float, float]:
 def _fertilizer_crop_key(value: str | None) -> str:
     crop = (value or "wheat").strip().lower()
     return CROP_ALIASES.get(crop, crop)
+
+
+def _crop_group(crop: str) -> str:
+    return CROP_GROUPS.get(crop, "cereal")
 
 
 class FertilizerRecommendationService:
@@ -127,19 +221,21 @@ class FertilizerRecommendationService:
 
     def recommend(self, field: Field, body: FertilizerRecommendationRequest) -> dict[str, Any]:
         crop = _fertilizer_crop_key(body.crop or field.crop_type)
+        crop_group = _crop_group(crop)
         area_ha = float(field.area_ha or 1.0)
-        features = self._build_features(field, body, crop, area_ha)
+        features = self._build_features(field, body, crop, crop_group, area_ha)
         prediction_frame = pd.DataFrame([{name: features.get(name, 0) for name in self._feature_names}])
 
         formula = str(self._model.predict(prediction_frame)[0])
         confidence = self._predict_confidence(prediction_frame, formula)
-        nutrient_need = self._nutrient_need(crop, body.target_yield_t_ha, body.ndvi)
+        nutrient_need = self._nutrient_need(crop, crop_group, body.target_yield_t_ha, body.ndvi)
         fertilizer_kg_per_ha = self._fertilizer_kg_per_ha(formula, nutrient_need)
         total_fertilizer_kg = fertilizer_kg_per_ha * area_ha
 
         return {
             "field_id": str(field.id),
             "crop": crop,
+            "crop_group": crop_group,
             "formula": formula,
             "confidence": confidence,
             "area_ha": round(area_ha, 2),
@@ -149,7 +245,8 @@ class FertilizerRecommendationService:
             "nutrient_need_kg_ha": {key: round(value, 2) for key, value in nutrient_need.items()},
             "model_features": features,
             "explanation": (
-                f"The model selected {formula} for {crop} using soil type {body.soil_type}, "
+                f"The model selected {formula} for {crop} using the {crop_group.replace('_', ' ')} "
+                f"nutrient profile, soil type {body.soil_type}, "
                 f"{body.ndvi:.2f} NDVI, pH {body.ph:.1f}, and a "
                 f"{body.target_yield_t_ha:.1f} t/ha target yield."
             ),
@@ -160,10 +257,12 @@ class FertilizerRecommendationService:
         field: Field,
         body: FertilizerRecommendationRequest,
         crop: str,
+        crop_group: str,
         area_ha: float,
     ) -> dict[str, str | float]:
         return {
             "crop": crop,
+            "crop_group": crop_group,
             "soil_type": body.soil_type,
             "texture": body.texture,
             "drainage": body.drainage,
@@ -190,8 +289,17 @@ class FertilizerRecommendationService:
             return None
         return round(float(probabilities[class_index]), 3)
 
-    def _nutrient_need(self, crop: str, target_yield_t_ha: float, ndvi: float) -> dict[str, float]:
-        base = CROP_BASE_NEEDS_KG_HA.get(crop, CROP_BASE_NEEDS_KG_HA["wheat"])
+    def _nutrient_need(
+        self,
+        crop: str,
+        crop_group: str,
+        target_yield_t_ha: float,
+        ndvi: float,
+    ) -> dict[str, float]:
+        base = CROP_BASE_NEEDS_KG_HA.get(
+            crop,
+            CROP_GROUP_BASE_NEEDS_KG_HA.get(crop_group, CROP_GROUP_BASE_NEEDS_KG_HA["cereal"]),
+        )
         yield_factor = max(target_yield_t_ha / 4.0, 0.5)
         fertility_factor = {"low": 1.2, "medium": 1.0, "high": 0.75}[_fertility_level(ndvi)]
         return {

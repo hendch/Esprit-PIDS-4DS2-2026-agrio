@@ -23,6 +23,7 @@ const GREEN = "#4CAF50";
 const GREEN_LIGHT = "#E8F5E9";
 const ORANGE = "#FF9800";
 const RED = "#E53935";
+const NEUTRAL_FIELD = "#CFD8DC";
 
 type FieldOptimizeResponse = {
   field_id: string;
@@ -52,6 +53,13 @@ type FieldOptimizeResponse = {
     rain_sum?: number | null;
     temp_stress?: number | null;
   };
+};
+
+type FieldHealth = {
+  label: string;
+  color: string;
+  textColor: string;
+  ndviLabel: string;
 };
 
 function TabBar({ active }: { active: string }) {
@@ -137,6 +145,63 @@ function priorityLabel(priority?: string): string {
   return priority.replace(/-/g, " ");
 }
 
+function fieldHealthFromOptimize(optimize?: FieldOptimizeResponse): FieldHealth {
+  const ndvi = optimize?.context.ndvi_mean;
+  const priority = optimize?.optimization_priority;
+
+  if (typeof ndvi === "number") {
+    if (ndvi >= 0.55) {
+      return {
+        label: "Healthy",
+        color: "#43A047",
+        textColor: "#FFF",
+        ndviLabel: `NDVI ${ndvi.toFixed(3)}`,
+      };
+    }
+
+    if (ndvi >= 0.35) {
+      return {
+        label: "Monitor",
+        color: ORANGE,
+        textColor: "#1F1F1F",
+        ndviLabel: `NDVI ${ndvi.toFixed(3)}`,
+      };
+    }
+
+    return {
+      label: "Needs attention",
+      color: RED,
+      textColor: "#FFF",
+      ndviLabel: `NDVI ${ndvi.toFixed(3)}`,
+    };
+  }
+
+  if (priority === "intervene-soon") {
+    return {
+      label: "Needs attention",
+      color: RED,
+      textColor: "#FFF",
+      ndviLabel: "NDVI pending",
+    };
+  }
+
+  if (priority === "stable") {
+    return {
+      label: "Healthy",
+      color: "#43A047",
+      textColor: "#FFF",
+      ndviLabel: "NDVI pending",
+    };
+  }
+
+  return {
+    label: "Checking health",
+    color: NEUTRAL_FIELD,
+    textColor: "#1F1F1F",
+    ndviLabel: "NDVI pending",
+  };
+}
+
 async function optimizeField(
   fieldId: string,
   payload: { year: number; governorate?: string; irrigated?: boolean },
@@ -214,7 +279,7 @@ export function LandScreen() {
   const totalArea = fields.reduce((sum, field) => sum + (field.areaHa ?? 0), 0);
   const irrigatedCount = fields.filter((field) => field.irrigated).length;
   const highPriorityCount = Object.values(optimizerByField).filter(
-    (opt) => opt.optimization_priority === "intervene-soon",
+    (opt) => fieldHealthFromOptimize(opt).label === "Needs attention",
   ).length;
 
   return (
@@ -323,10 +388,10 @@ export function LandScreen() {
             </View>
           ) : null}
 
-          {fields.map((field, index) => {
+          {fields.map((field) => {
             const notesPreview = truncateNotes(field.fieldNotes);
-            const cardColor = index % 2 === 0 ? "#A5D6A7" : "#AED581";
             const optimize = optimizerByField[field.id];
+            const health = fieldHealthFromOptimize(optimize);
             const yieldSummary =
               optimize && field.areaHa != null
                 ? formatYield(optimize.yield_hg_per_ha, field.areaHa)
@@ -338,7 +403,7 @@ export function LandScreen() {
                 style={styles.fieldCard}
                 onPress={() => nav.navigate(Routes.FieldDetail, { fieldId: field.id })}
               >
-                <View style={[styles.fieldHero, { height: heroHeight, backgroundColor: cardColor }]}>
+                <View style={[styles.fieldHero, { height: heroHeight, backgroundColor: health.color }]}>
                   <View style={styles.fieldHeroTop}>
                     <View style={styles.tagGreen}>
                       <Text style={styles.tagText}>{field.name}</Text>
@@ -350,15 +415,40 @@ export function LandScreen() {
                   </View>
 
                   <View style={styles.fieldHeroBottom}>
-                    <View style={styles.tagOutline}>
-                      <Text style={styles.tagOutlineText}>
-                        {field.areaHa != null ? `${field.areaHa.toFixed(2)} ha` : "Area unavailable"}
-                      </Text>
+                    <View style={styles.fieldHeroBottomRow}>
+                      <View style={styles.tagOutline}>
+                        <Text style={styles.tagOutlineText}>
+                          {field.areaHa != null ? `${field.areaHa.toFixed(2)} ha` : "Area unavailable"}
+                        </Text>
+                      </View>
+
+                      <View style={styles.healthTag}>
+                        <Text style={[styles.healthTagText, { color: health.textColor }]}>
+                          {health.label}
+                        </Text>
+                        <Text style={[styles.healthTagSubtext, { color: health.textColor }]}>
+                          {health.ndviLabel}
+                        </Text>
+                      </View>
                     </View>
                   </View>
                 </View>
 
                 <View style={styles.fieldInfo}>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Field Health</Text>
+                    <Text style={[styles.infoValue, { color: health.color }]}>
+                      {health.label} · {health.ndviLabel}
+                    </Text>
+                  </View>
+
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Area</Text>
+                    <Text style={styles.infoValue}>
+                        {field.areaHa != null ? `${field.areaHa.toFixed(2)} ha` : "Area unavailable"}
+                      </Text>
+                  </View>
+
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>Governorate</Text>
                     <Text style={styles.infoValue}>{field.governorate || "Not set"}</Text>
@@ -607,6 +697,25 @@ const styles = StyleSheet.create({
   },
   fieldHeroBottom: {
     alignItems: "flex-start",
+  },
+  fieldHeroBottomRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    gap: 10,
+  },
+  healthTag: {
+    alignItems: "flex-end",
+  },
+  healthTagText: {
+    fontSize: 16,
+    fontWeight: "800",
+  },
+  healthTagSubtext: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
   },
 
   tagGreen: {
