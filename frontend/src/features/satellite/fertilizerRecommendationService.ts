@@ -3,6 +3,7 @@ import { httpClient } from "../../core/api/httpClient";
 export type FertilizerRecommendation = {
   field_id: string;
   crop: string;
+  crop_group: string;
   formula: string;
   confidence: number | null;
   area_ha: number;

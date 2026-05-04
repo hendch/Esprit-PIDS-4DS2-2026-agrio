@@ -1,22 +1,37 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  GestureResponderEvent,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
 } from "react-native";
+import MapView, { Marker, Polygon, PROVIDER_GOOGLE, Region } from "react-native-maps";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { Routes } from "../../core/navigation/routes";
 import { useTheme } from "../../core/theme/useTheme";
 import { httpClient } from "../../core/api/httpClient";
-import { FieldBoundaryRecord, deleteFieldBoundary, getFieldBoundary } from "./fieldBoundaryService";
+import {
+  FieldBoundaryRecord,
+  FieldMoistureSensor,
+  FieldTask,
+  createFieldMoistureSensor,
+  deleteFieldBoundary,
+  deleteFieldMoistureSensor,
+  getFieldBoundary,
+  listFieldMoistureSensors,
+  listFieldTasks,
+  updateFieldTask,
+} from "./fieldBoundaryService";
 import {
   FertilizerRecommendation,
   getFertilizerRecommendation,
@@ -97,6 +112,15 @@ type FieldOptimizeResponse = {
   };
 };
 
+type SensorDraft = {
+  name: string;
+  depthCm: string;
+  moisturePct: string;
+  notes: string;
+  latitude?: number;
+  longitude?: number;
+};
+
 function TabBar({ active }: { active: string }) {
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
@@ -148,6 +172,31 @@ function formatYield(hgPerHa: number, areaHa?: number | null) {
     kgPerHa,
     tonnesPerHa,
     totalTonnes,
+  };
+}
+
+function fieldMapRegion(field: FieldBoundaryRecord): Region {
+  if (field.points.length === 0) {
+    return {
+      latitude: field.centroidLat ?? 36.8065,
+      longitude: field.centroidLon ?? 10.1815,
+      latitudeDelta: 0.02,
+      longitudeDelta: 0.02,
+    };
+  }
+
+  const latitudes = field.points.map((point) => point.latitude);
+  const longitudes = field.points.map((point) => point.longitude);
+  const latitude = field.centroidLat ?? latitudes.reduce((sum, value) => sum + value, 0) / Math.max(latitudes.length, 1);
+  const longitude = field.centroidLon ?? longitudes.reduce((sum, value) => sum + value, 0) / Math.max(longitudes.length, 1);
+  const latitudeDelta = Math.max(Math.max(...latitudes) - Math.min(...latitudes), 0.005) * 2.2;
+  const longitudeDelta = Math.max(Math.max(...longitudes) - Math.min(...longitudes), 0.005) * 2.2;
+
+  return {
+    latitude,
+    longitude,
+    latitudeDelta,
+    longitudeDelta,
   };
 }
 
@@ -283,6 +332,7 @@ export function FieldDetailScreen() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { colors } = useTheme();
+  const sensorPickerMapRef = useRef<MapView | null>(null);
 
   const params = route.params as RouteParams | undefined;
   const fieldId = params?.fieldId;
@@ -293,12 +343,24 @@ export function FieldDetailScreen() {
   const [ndvi, setNdvi] = useState<FieldNdviResponse | null>(null);
   const [optimize, setOptimize] = useState<FieldOptimizeResponse | null>(null);
   const [fertilizer, setFertilizer] = useState<FertilizerRecommendation | null>(null);
+  const [sensors, setSensors] = useState<FieldMoistureSensor[]>([]);
+  const [tasks, setTasks] = useState<FieldTask[]>([]);
+  const [sensorDraft, setSensorDraft] = useState<SensorDraft>({
+    name: "",
+    depthCm: "20",
+    moisturePct: "45",
+    notes: "",
+  });
+  const [sensorModalVisible, setSensorModalVisible] = useState(false);
 
   const [isLoadingField, setIsLoadingField] = useState(true);
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [isLoadingNdvi, setIsLoadingNdvi] = useState(false);
   const [isLoadingOptimize, setIsLoadingOptimize] = useState(false);
   const [isLoadingFertilizer, setIsLoadingFertilizer] = useState(false);
+  const [isLoadingSensors, setIsLoadingSensors] = useState(false);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [isSavingSensor, setIsSavingSensor] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -306,6 +368,8 @@ export function FieldDetailScreen() {
   const [ndviError, setNdviError] = useState<string | null>(null);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
   const [fertilizerError, setFertilizerError] = useState<string | null>(null);
+  const [sensorError, setSensorError] = useState<string | null>(null);
+  const [taskError, setTaskError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -388,6 +452,34 @@ export function FieldDetailScreen() {
           .finally(() => {
             if (isMounted) setIsLoadingFertilizer(false);
           });
+
+        setIsLoadingSensors(true);
+        setSensorError(null);
+        listFieldMoistureSensors(fieldId)
+          .then((data) => {
+            if (isMounted) setSensors(data);
+          })
+          .catch((error) => {
+            console.error("Moisture sensors failed:", error);
+            if (isMounted) setSensorError("Moisture sensors unavailable.");
+          })
+          .finally(() => {
+            if (isMounted) setIsLoadingSensors(false);
+          });
+
+        setIsLoadingTasks(true);
+        setTaskError(null);
+        listFieldTasks(fieldId)
+          .then((data) => {
+            if (isMounted) setTasks(data);
+          })
+          .catch((error) => {
+            console.error("Field tasks failed:", error);
+            if (isMounted) setTaskError("Field tasks unavailable.");
+          })
+          .finally(() => {
+            if (isMounted) setIsLoadingTasks(false);
+          });
       } catch (error) {
         console.error("Load field failed:", error);
         if (isMounted) {
@@ -415,6 +507,116 @@ export function FieldDetailScreen() {
     if (!field) return null;
     return buildRecommendation(field, optimize, weather, ndvi, effectiveNdviMean);
   }, [field, optimize, weather, ndvi, effectiveNdviMean]);
+
+  const mapRegion = useMemo(() => (field ? fieldMapRegion(field) : null), [field]);
+
+  const onOpenSensorModal = () => {
+    if (!field) {
+      return;
+    }
+    setSensorDraft({
+      name: "",
+      depthCm: "20",
+      moisturePct: "45",
+      notes: "",
+      latitude: field.centroidLat ?? field.points[0]?.latitude,
+      longitude: field.centroidLon ?? field.points[0]?.longitude,
+    });
+    setSensorModalVisible(true);
+  };
+
+  const onSensorMapTouchEnd = async (event: GestureResponderEvent) => {
+    try {
+      const coordinate = await sensorPickerMapRef.current?.coordinateForPoint({
+        x: event.nativeEvent.locationX,
+        y: event.nativeEvent.locationY,
+      });
+      if (coordinate) {
+        setSensorDraft((current) => ({
+          ...current,
+          latitude: coordinate.latitude,
+          longitude: coordinate.longitude,
+        }));
+      }
+    } catch (error) {
+      console.warn("Sensor map tap failed:", error);
+      Alert.alert("Map tap failed", "Could not place the sensor here. Try tapping again.");
+    }
+  };
+
+  const onSaveSensor = async () => {
+    if (!fieldId) {
+      return;
+    }
+    if (!sensorDraft.name.trim()) {
+      Alert.alert("Missing sensor name", "Please enter a name for this moisture sensor.");
+      return;
+    }
+    if (sensorDraft.latitude == null || sensorDraft.longitude == null) {
+      Alert.alert("Missing sensor location", "Tap the field map to place this sensor.");
+      return;
+    }
+
+    const moisture = Number(sensorDraft.moisturePct);
+    const depth = sensorDraft.depthCm.trim() ? Number(sensorDraft.depthCm) : undefined;
+    if (!Number.isFinite(moisture) || moisture < 0 || moisture > 100) {
+      Alert.alert("Invalid moisture", "Moisture must be between 0 and 100.");
+      return;
+    }
+
+    try {
+      setIsSavingSensor(true);
+      const created = await createFieldMoistureSensor(fieldId, {
+        name: sensorDraft.name.trim(),
+        latitude: sensorDraft.latitude,
+        longitude: sensorDraft.longitude,
+        depthCm: Number.isFinite(depth) ? depth : undefined,
+        simulatedMoisturePct: moisture,
+        notes: sensorDraft.notes.trim() || undefined,
+      });
+      setSensors((current) => [created, ...current]);
+      setSensorModalVisible(false);
+    } catch (error) {
+      console.error("Create sensor failed:", error);
+      Alert.alert("Save failed", "Could not save this moisture sensor.");
+    } finally {
+      setIsSavingSensor(false);
+    }
+  };
+
+  const onDeleteSensor = async (sensor: FieldMoistureSensor) => {
+    if (!fieldId) {
+      return;
+    }
+    try {
+      await deleteFieldMoistureSensor(fieldId, sensor.id);
+      setSensors((current) => current.filter((item) => item.id !== sensor.id));
+    } catch (error) {
+      console.error("Delete sensor failed:", error);
+      Alert.alert("Delete failed", "Could not delete this moisture sensor.");
+    }
+  };
+
+  const onToggleTask = async (task: FieldTask) => {
+    if (!fieldId) {
+      return;
+    }
+    const nextCompleted = !task.completed;
+    setTasks((current) =>
+      current.map((item) => (item.id === task.id ? { ...item, completed: nextCompleted } : item)),
+    );
+
+    try {
+      const updated = await updateFieldTask(fieldId, task.id, nextCompleted);
+      setTasks((current) => current.map((item) => (item.id === task.id ? updated : item)));
+    } catch (error) {
+      console.error("Update task failed:", error);
+      setTasks((current) =>
+        current.map((item) => (item.id === task.id ? { ...item, completed: task.completed } : item)),
+      );
+      Alert.alert("Task update failed", "Could not update this task.");
+    }
+  };
 
   const onUpdateField = () => {
     if (!fieldId) {
@@ -585,6 +787,95 @@ export function FieldDetailScreen() {
             </View>
 
             <View style={styles.card}>
+              <View style={styles.cardTitleRow}>
+                <Text style={styles.cardTitle}>Moisture Sensors</Text>
+                <Pressable style={styles.smallActionBtn} onPress={onOpenSensorModal}>
+                  <Text style={styles.smallActionBtnText}>Add Sensor</Text>
+                </Pressable>
+              </View>
+
+              {mapRegion ? (
+                <View style={styles.sensorMapWrap}>
+                  <MapView
+                    provider={PROVIDER_GOOGLE}
+                    style={styles.sensorMap}
+                    initialRegion={mapRegion}
+                    mapType="hybrid"
+                    scrollEnabled={false}
+                    zoomEnabled={false}
+                    rotateEnabled={false}
+                    pitchEnabled={false}
+                  >
+                    {field.points.length >= 3 ? (
+                      <Polygon
+                        coordinates={field.points}
+                        strokeColor="#2E7D32"
+                        fillColor="rgba(46, 125, 50, 0.22)"
+                        strokeWidth={2}
+                      />
+                    ) : null}
+
+                    {sensors.map((sensor) => (
+                      <Marker
+                        key={sensor.id}
+                        coordinate={{ latitude: sensor.latitude, longitude: sensor.longitude }}
+                      />
+                    ))}
+                  </MapView>
+                </View>
+              ) : null}
+
+              {isLoadingSensors ? <Text style={styles.inlineStateText}>Loading sensors...</Text> : null}
+              {sensorError ? <Text style={styles.inlineErrorText}>{sensorError}</Text> : null}
+
+              {!isLoadingSensors && sensors.length === 0 ? (
+                <Text style={styles.inlineStateText}>
+                  No simulated moisture sensors yet. Add one and place it inside the field.
+                </Text>
+              ) : null}
+
+              {sensors.map((sensor) => (
+                <View key={sensor.id} style={styles.sensorRow}>
+                  <View style={styles.sensorInfo}>
+                    <Text style={styles.sensorName}>{sensor.name}</Text>
+                    <Text style={styles.sensorMeta}>
+                      Moisture {sensor.simulatedMoisturePct.toFixed(1)}%
+                      {sensor.depthCm != null ? ` · ${sensor.depthCm.toFixed(0)} cm depth` : ""}
+                    </Text>
+                    <Text style={styles.sensorMeta}>
+                      {sensor.latitude.toFixed(5)}, {sensor.longitude.toFixed(5)}
+                    </Text>
+                    {sensor.notes ? <Text style={styles.sensorMeta}>{sensor.notes}</Text> : null}
+                  </View>
+                  <Pressable style={styles.sensorDeleteBtn} onPress={() => onDeleteSensor(sensor)}>
+                    <Text style={styles.sensorDeleteText}>Delete</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Field Tasks</Text>
+
+              {isLoadingTasks ? <Text style={styles.inlineStateText}>Loading tasks...</Text> : null}
+              {taskError ? <Text style={styles.inlineErrorText}>{taskError}</Text> : null}
+
+              {tasks.map((task) => (
+                <Pressable key={task.id} style={styles.taskRow} onPress={() => onToggleTask(task)}>
+                  <View style={[styles.taskCheckbox, task.completed && styles.taskCheckboxDone]}>
+                    <Text style={styles.taskCheckboxText}>{task.completed ? "✓" : ""}</Text>
+                  </View>
+                  <View style={styles.taskContent}>
+                    <Text style={[styles.taskTitle, task.completed && styles.taskTitleDone]}>
+                      {task.title}
+                    </Text>
+                    {task.note ? <Text style={styles.taskNote}>{task.note}</Text> : null}
+                  </View>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>Agronomic Optimizer</Text>
 
               {isLoadingOptimize ? (
@@ -720,6 +1011,9 @@ export function FieldDetailScreen() {
                   <Text style={styles.secondaryMetric}>
                     Total for field: {fertilizer.total_fertilizer_kg.toFixed(1)} kg
                   </Text>
+                  <Text style={styles.secondaryMetric}>
+                    Crop profile: {fertilizer.crop_group.replace(/_/g, " ")}
+                  </Text>
 
                   <View style={styles.contextBlock}>
                     <Text style={styles.contextTitle}>Nutrient Need</Text>
@@ -810,6 +1104,104 @@ export function FieldDetailScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={sensorModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSensorModalVisible(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.sensorModalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Add Moisture Sensor</Text>
+              <TouchableOpacity onPress={() => setSensorModalVisible(false)}>
+                <Text style={styles.modalClose}>×</Text>
+              </TouchableOpacity>
+            </View>
+
+            {field && mapRegion ? (
+              <View style={styles.sensorPickerMapWrap}>
+                <MapView
+                  ref={sensorPickerMapRef}
+                  provider={PROVIDER_GOOGLE}
+                  style={styles.sensorPickerMap}
+                  initialRegion={mapRegion}
+                  mapType="hybrid"
+                  onTouchEnd={onSensorMapTouchEnd}
+                  toolbarEnabled={false}
+                >
+                  {field.points.length >= 3 ? (
+                    <Polygon
+                      coordinates={field.points}
+                      strokeColor="#2E7D32"
+                      fillColor="rgba(46, 125, 50, 0.18)"
+                      strokeWidth={2}
+                    />
+                  ) : null}
+
+                  {sensorDraft.latitude != null && sensorDraft.longitude != null ? (
+                    <Marker
+                      coordinate={{
+                        latitude: sensorDraft.latitude,
+                        longitude: sensorDraft.longitude,
+                      }}
+                    />
+                  ) : null}
+                </MapView>
+              </View>
+            ) : null}
+
+            <Text style={styles.modalHint}>Tap the map to place the simulated sensor.</Text>
+
+            <TextInput
+              value={sensorDraft.name}
+              onChangeText={(value) => setSensorDraft((current) => ({ ...current, name: value }))}
+              placeholder="Sensor name"
+              placeholderTextColor="#777"
+              style={styles.modalInput}
+            />
+
+            <View style={styles.modalInputRow}>
+              <TextInput
+                value={sensorDraft.depthCm}
+                onChangeText={(value) => setSensorDraft((current) => ({ ...current, depthCm: value }))}
+                placeholder="Depth cm"
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                style={[styles.modalInput, styles.modalHalfInput]}
+              />
+              <TextInput
+                value={sensorDraft.moisturePct}
+                onChangeText={(value) => setSensorDraft((current) => ({ ...current, moisturePct: value }))}
+                placeholder="Moisture %"
+                placeholderTextColor="#777"
+                keyboardType="numeric"
+                style={[styles.modalInput, styles.modalHalfInput]}
+              />
+            </View>
+
+            <TextInput
+              value={sensorDraft.notes}
+              onChangeText={(value) => setSensorDraft((current) => ({ ...current, notes: value }))}
+              placeholder="Basic notes (optional)"
+              placeholderTextColor="#777"
+              style={[styles.modalInput, styles.modalNotesInput]}
+              multiline
+            />
+
+            <Pressable
+              style={[styles.saveSensorBtn, isSavingSensor && styles.actionBtnDisabled]}
+              onPress={onSaveSensor}
+              disabled={isSavingSensor}
+            >
+              <Text style={styles.saveSensorBtnText}>
+                {isSavingSensor ? "Saving..." : "Save Sensor"}
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       <TabBar active="Land" />
     </View>
@@ -958,6 +1350,110 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#2C2C2C",
     marginBottom: 14,
+  },
+  cardTitleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 14,
+  },
+  smallActionBtn: {
+    backgroundColor: GREEN,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  smallActionBtnText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  sensorMapWrap: {
+    height: 150,
+    borderRadius: 12,
+    overflow: "hidden",
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  sensorMap: {
+    width: "100%",
+    height: "100%",
+  },
+  sensorRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EEE",
+  },
+  sensorInfo: {
+    flex: 1,
+  },
+  sensorName: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#2C2C2C",
+  },
+  sensorMeta: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 3,
+  },
+  sensorDeleteBtn: {
+    alignSelf: "center",
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  sensorDeleteText: {
+    color: RED,
+    fontWeight: "800",
+    fontSize: 12,
+  },
+  taskRow: {
+    flexDirection: "row",
+    gap: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#EEE",
+  },
+  taskCheckbox: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  taskCheckboxDone: {
+    backgroundColor: GREEN,
+  },
+  taskCheckboxText: {
+    color: "#FFF",
+    fontWeight: "900",
+  },
+  taskContent: {
+    flex: 1,
+  },
+  taskTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#2C2C2C",
+  },
+  taskTitleDone: {
+    color: "#777",
+    textDecorationLine: "line-through",
+  },
+  taskNote: {
+    marginTop: 3,
+    fontSize: 12,
+    color: "#666",
+    lineHeight: 17,
   },
 
   infoRow: {
@@ -1145,4 +1641,79 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 20 },
   tabLabel: { fontSize: 10, color: "#666" },
   tabLabelActive: { color: GREEN, fontWeight: "600" },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  },
+  sensorModalCard: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    padding: 16,
+    maxHeight: "88%",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#222",
+  },
+  modalClose: {
+    fontSize: 22,
+    color: "#666",
+  },
+  sensorPickerMapWrap: {
+    height: 220,
+    borderRadius: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#DDD",
+  },
+  sensorPickerMap: {
+    width: "100%",
+    height: "100%",
+  },
+  modalHint: {
+    color: "#666",
+    fontSize: 12,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  modalInput: {
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#D5D5D5",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    color: "#222",
+    marginBottom: 10,
+  },
+  modalInputRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  modalHalfInput: {
+    flex: 1,
+  },
+  modalNotesInput: {
+    minHeight: 72,
+    textAlignVertical: "top",
+  },
+  saveSensorBtn: {
+    backgroundColor: GREEN,
+    borderRadius: 10,
+    alignItems: "center",
+    paddingVertical: 13,
+  },
+  saveSensorBtnText: {
+    color: "#FFF",
+    fontWeight: "800",
+  },
 });

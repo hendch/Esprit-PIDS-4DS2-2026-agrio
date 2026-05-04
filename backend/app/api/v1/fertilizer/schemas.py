@@ -18,6 +18,7 @@ class FertilizerRecommendationRequest(BaseModel):
 class FertilizerRecommendationResponse(BaseModel):
     field_id: str
     crop: str
+    crop_group: str
     formula: str
     confidence: float | None
     area_ha: float
