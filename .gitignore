@@ -9,3 +9,9 @@ node_modules/
 
 # Backend secrets
 backend/backend.env
+
+# Firebase credentials - never commit these
+google-services.json
+*-firebase-adminsdk-*.json
+*.keystore
+*.jks

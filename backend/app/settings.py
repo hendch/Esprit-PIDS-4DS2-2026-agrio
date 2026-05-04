@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import SecretStr
+
 
 
 class Settings(BaseSettings):
@@ -38,6 +40,20 @@ class Settings(BaseSettings):
 
     open_meteo_base_url: str = "https://api.open-meteo.com"
     media_root: str = "./media"
+    market_data_dir: str = "./data/market_prices/raw"
+    market_forecast_cache_dir: str = "./data/market_prices/cache"
+    market_retrain_on_startup: bool = False
+
+    produce_data_dir: str = "data/produce_prices/raw"
+    produce_forecast_cache_dir: str = "data/produce_prices/cache"
+    produce_forecast_horizon: int = 12
+    produce_retrain_on_startup: bool = False
+
+    cdse_client_id: str | None = None
+    cdse_client_secret: SecretStr | None = None
+
+    fertilizer_model_path: str = "app/modules/fertilizer/model/fertilizer_recommendation_rf.joblib"
+    fertilizer_feature_schema_path: str = "app/modules/fertilizer/model/features.json"
 
     # S3 storage
     s3_bucket_name: str = ""

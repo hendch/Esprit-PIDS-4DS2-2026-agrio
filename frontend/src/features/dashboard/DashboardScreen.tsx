@@ -17,6 +17,7 @@ import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useTheme } from "../../core/theme/useTheme";
 import { GREEN, GREEN_LIGHT } from "../../core/theme/themeColors";
 import { authApi } from "../auth/services/authApi";
+import { registerPushToken } from "../../core/notifications/notificationService";
 const ORANGE_LIGHT = "#FFF3E0";
 const BLUE_LIGHT = "#E3F2FD";
 const BROWN_LIGHT = "#EFEBE9";
@@ -36,6 +37,7 @@ export function DashboardScreen() {
   const displayName = useUserStore((s) => s.displayName);
   const email = useUserStore((s) => s.email);
   const accessToken = useUserStore((s) => s.accessToken);
+  const [notifEnabled, setNotifEnabled] = useState(false);
   const setUser = useUserStore((s) => s.setUser);
   const [nameOverride, setNameOverride] = useState<string | null>(null);
   const greeting = getGreeting();
@@ -155,6 +157,15 @@ export function DashboardScreen() {
                 onPress={() => nav.navigate(Routes.Livestock)}
               />
             </View>
+            <View style={{ width: cardWidth }}>
+              <HomePageCard
+                icon="📈"
+                title="Market & Produce Prices"
+                subtitle="Price forecasts & trends"
+                backgroundColor={BLUE_LIGHT}
+                onPress={() => nav.navigate(Routes.MarketPrices)}
+              />
+            </View>
           </View>
         </View>
 
@@ -198,8 +209,17 @@ export function DashboardScreen() {
             Enable push notifications to receive instant alerts about critical crop health
             issues and irrigation system status.
           </Text>
-          <TouchableOpacity style={styles.enableNotificationsBtn}>
-            <Text style={styles.enableNotificationsText}>Enable Notifications</Text>
+          <TouchableOpacity
+            style={[styles.enableNotificationsBtn, notifEnabled && { backgroundColor: "#388E3C" }]}
+            onPress={async () => {
+              const ok = await registerPushToken();
+              setNotifEnabled(ok);
+            }}
+            disabled={notifEnabled}
+          >
+            <Text style={styles.enableNotificationsText}>
+              {notifEnabled ? "Notifications Enabled ✓" : "Enable Notifications"}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
@@ -211,6 +231,7 @@ export function DashboardScreen() {
         <TabItem icon="🌱" label="Crop" onPress={() => nav.navigate(Routes.DiseaseDetection)} />
         <TabItem icon="💧" label="Water" onPress={() => nav.navigate(Routes.Irrigation)} />
         <TabItem icon="🎯" label="Livestock" onPress={() => nav.navigate(Routes.Livestock)} />
+        <TabItem icon="📈" label="Prices" onPress={() => nav.navigate(Routes.MarketPrices)} />
         <TabItem icon="👥" label="Community" onPress={() => nav.navigate(Routes.Community)} />
         <TabItem icon="🔔" label="Alerts" onPress={() => nav.navigate(Routes.Alerts)} />
       </View>

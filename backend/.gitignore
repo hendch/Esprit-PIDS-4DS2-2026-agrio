@@ -14,6 +14,11 @@ pytest-cache-files-*/
 agrio.db
 irrigation.db
 
+# Market price data cache
+data/market_prices/cache/
+data/market_prices/raw/*.xls
+data/market_prices/raw/*.xlsx
+
 # Stray artifacts if tools write under backend/
 *.log
 node_modules/

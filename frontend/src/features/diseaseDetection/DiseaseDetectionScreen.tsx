@@ -69,6 +69,7 @@ function TabBar({ active }: { active: string }) {
     { key: "Crop", icon: "🌱", route: Routes.DiseaseDetection },
     { key: "Water", icon: "💧", route: Routes.Irrigation },
     { key: "Livestock", icon: "🎯", route: Routes.Livestock },
+    { key: "Prices", icon: "📈", route: Routes.MarketPrices },
     { key: "Community", icon: "👥", route: Routes.Community },
     { key: "Alerts", icon: "🔔", route: Routes.Alerts },
   ];

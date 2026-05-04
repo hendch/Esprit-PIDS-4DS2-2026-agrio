@@ -10,6 +10,8 @@ import { communityModule } from "../features/community/CommunityModule";
 import { alertsModule } from "../features/alerts/AlertsModule";
 // Keep ledger optional (can be hidden from dashboard)
 import { farmTrustLedgerModule } from "../features/farmTrustLedger/FarmTrustLedgerModule";
+import { marketPricesModule } from "../features/marketPrices";
+import { producePricesModule } from "../features/producePrices";
 
 let registered = false;
 
@@ -26,4 +28,6 @@ export function registerFeatures() {
   featureRegistry.register(communityModule);
   featureRegistry.register(alertsModule);
   featureRegistry.register(farmTrustLedgerModule);
+  featureRegistry.register(marketPricesModule);
+  featureRegistry.register(producePricesModule);
 }

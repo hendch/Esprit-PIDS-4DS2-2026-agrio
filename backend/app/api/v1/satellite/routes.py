@@ -1,49 +1,84 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.di import get_db
+from app.modules.farms.repository import FarmRepository
+from app.modules.satellite.providers.demo_provider import DemoProvider
+from app.modules.satellite.providers.sentinel_provider import SentinelProvider
+from app.modules.satellite.repository import SatelliteRepository
+from app.modules.satellite.service import SatelliteService
 
 from .schemas import NDVIResponse, SatelliteSnapshot, ZoneMapResponse
 
 router = APIRouter()
 
-_NOW = datetime.now(tz=timezone.utc)
+
+def get_satellite_service(db: AsyncSession = Depends(get_db)) -> SatelliteService:
+    # Switch to DemoProvider() if you need a fallback while credentials are not configured.
+    provider = SentinelProvider()
+    return SatelliteService(
+        provider=provider,
+        repo=SatelliteRepository(db),
+        farm_repo=FarmRepository(db),
+    )
 
 
 @router.get("/snapshot/{field_id}", response_model=SatelliteSnapshot)
-async def get_snapshot(field_id: str) -> SatelliteSnapshot:
-    # TODO: inject service
-    return SatelliteSnapshot(
-        id="snap-001",
-        field_id=field_id,
-        captured_at=_NOW,
-        provider="sentinel-2",
-        indices={"ndvi": 0.72, "evi": 0.55},
-    )
+async def get_snapshot(
+    field_id: str,
+    service: SatelliteService = Depends(get_satellite_service),
+) -> SatelliteSnapshot:
+    try:
+        parsed_field_id = uuid.UUID(field_id)
+        payload = await service.fetch_snapshot(parsed_field_id)
+        return SatelliteSnapshot(**payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Satellite snapshot failed: {exc}") from exc
 
 
 @router.get("/ndvi/{field_id}", response_model=NDVIResponse)
-async def get_ndvi(field_id: str) -> NDVIResponse:
-    # TODO: inject service
-    return NDVIResponse(
-        field_id=field_id,
-        mean_ndvi=0.72,
-        min_ndvi=0.45,
-        max_ndvi=0.91,
-        captured_at=_NOW,
-    )
+async def get_ndvi(
+    field_id: str,
+    service: SatelliteService = Depends(get_satellite_service),
+) -> NDVIResponse:
+    try:
+        parsed_field_id = uuid.UUID(field_id)
+        payload = await service.compute_ndvi(parsed_field_id)
+        return NDVIResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"NDVI computation failed: {exc}") from exc
 
 
 @router.get("/zones/{field_id}", response_model=ZoneMapResponse)
-async def get_zones(field_id: str) -> ZoneMapResponse:
-    # TODO: inject service
-    return ZoneMapResponse(
-        field_id=field_id,
-        zones=[
-            {"zone_id": 1, "label": "high-vigor", "area_pct": 40.0},
-            {"zone_id": 2, "label": "medium-vigor", "area_pct": 45.0},
-            {"zone_id": 3, "label": "low-vigor", "area_pct": 15.0},
-        ],
-        generated_at=_NOW,
-    )
+async def get_zones(
+    field_id: str,
+    service: SatelliteService = Depends(get_satellite_service),
+) -> ZoneMapResponse:
+    try:
+        parsed_field_id = uuid.UUID(field_id)
+        payload = await service.generate_zones(parsed_field_id)
+        return ZoneMapResponse(**payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except NotImplementedError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Zone generation failed: {exc}") from exc
