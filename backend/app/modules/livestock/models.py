@@ -20,6 +20,8 @@ class Animal(Base, TimestampMixin):
     birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     tag_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     status: Mapped[str] = mapped_column(String, default="active")
+    purchase_price: Mapped[float | None] = mapped_column(nullable=True)
+    purchase_date: Mapped[date | None] = mapped_column(Date, nullable=True)
 
 
 class HealthEvent(Base, TimestampMixin):

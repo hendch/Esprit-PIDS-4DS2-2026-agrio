@@ -71,6 +71,7 @@ function TabBar({ active }: { active: string }) {
     { key: "Crop", icon: "🌱", route: Routes.DiseaseDetection },
     { key: "Water", icon: "💧", route: Routes.Irrigation },
     { key: "Livestock", icon: "🎯", route: Routes.Livestock },
+    { key: "Prices", icon: "📈", route: Routes.MarketPrices },
     { key: "Community", icon: "👥", route: Routes.Community },
     { key: "Alerts", icon: "🔔", route: Routes.Alerts },
   ];
@@ -402,6 +403,11 @@ export function IrrigationScreen() {
               <View><Text style={styles.moistureLabel}>Optimal</Text><Text style={[styles.moistureValue, { color: GREEN }]}>45-55%</Text></View>
               <View><Text style={styles.moistureLabel}>Status</Text><View style={styles.statusPill}><Text style={styles.statusPillText}>{moistureStatus}</Text></View></View>
             </View>
+            <Text style={styles.sensorConnectionText}>
+              Sensor: {dashboardData?.moisture?.live ? "Live MQTT" : "Fallback value"}
+              {dashboardData?.moisture?.mqtt_connected ? " · broker connected" : " · broker not connected"}
+              {dashboardData?.moisture?.topic ? ` · ${dashboardData.moisture.topic}` : ""}
+            </Text>
             <View style={styles.graphWrap}>
               <View style={[styles.graphArea, { width: graphWidth, height: graphHeight }]}>
                 {moistureHistory.map((h: any, i: number) => (
@@ -609,6 +615,7 @@ const styles = StyleSheet.create({
   moistureStats: { flexDirection: "row", justifyContent: "space-between", marginBottom: 16 },
   moistureLabel: { fontSize: 12, color: "#666" },
   moistureValue: { fontSize: 16, fontWeight: "700", color: "#2C2C2C" },
+  sensorConnectionText: { fontSize: 12, color: "#666", marginBottom: 12 },
   statusPill: { backgroundColor: GREEN, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, alignSelf: "flex-start" },
   statusPillText: { fontSize: 12, fontWeight: "600", color: "#FFF" },
   graphWrap: { marginTop: 8 },

@@ -1,78 +1,83 @@
-import React, { useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  View,
-  Text,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
-  TouchableOpacity,
+  Text,
   TextInput,
-  Pressable,
-} from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Routes } from "../../core/navigation/routes";
-import { useDrawerStore } from "../../core/drawer/drawerStore";
-import { useTheme } from "../../core/theme/useTheme";
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 
-const OFFSET_WHITE = "#FAFAF8";
-const GREEN = "#4CAF50";
-const GREEN_LIGHT = "#E8F5E9";
+import { Routes } from '../../core/navigation/routes';
+import { useDrawerStore } from '../../core/drawer/drawerStore';
+import { useTheme } from '../../core/theme/useTheme';
+import { communityApi } from './api';
+import { useCommunityStore } from './store';
+import type { Comment, Post } from './types';
+import { CATEGORY_MAP } from './types';
 
-const FILTERS = ["All", "Irrigation", "Crop Health", "Livestock", "Land Planning"];
+// ─── constants ──────────────────────────────────────────────────────────────
 
-const POSTS = [
-  {
-    id: "1",
-    author: "Sarah Thompson",
-    initials: "ST",
-    avatarColor: "#B3E5FC",
-    time: "2 hours ago",
-    category: "Irrigation",
-    categoryColor: "#B3E5FC",
-    title: "Best practices for corn irrigation in summer?",
-    body: "I'm looking for advice on optimizing water usage during peak summer months. My fields are showing some stress and I want to avoid overwatering.",
-    likes: 24,
-    comments: 8,
-  },
-  {
-    id: "2",
-    author: "David Martinez",
-    initials: "DM",
-    avatarColor: "#C8E6C9",
-    time: "5 hours ago",
-    category: "Crop Health",
-    categoryColor: "#C8E6C9",
-    title: "AI-powered pest detection - worth the investment?",
-    body: "Has anyone tried using AI image recognition for pest detection? Considering investing in the technology but want real user experiences first.",
-    likes: 42,
-    comments: 15,
-  },
-  {
-    id: "3",
-    author: "Emily Chen",
-    initials: "EC",
-    avatarColor: "#EFEBE9",
-    time: "1 day ago",
-    category: "Livestock",
-    categoryColor: "#D7CCC8",
-    title: "Livestock tracking systems comparison",
-    body: "Looking for recommendations on GPS and health tracking systems for a herd of 50. What has worked best for you?",
-    likes: 18,
-    comments: 6,
-  },
-];
+const GREEN = '#4CAF50';
+const GREEN_LIGHT = '#E8F5E9';
+const OFFSET_WHITE = '#FAFAF8';
+
+const CATEGORY_BG: Record<string, string> = {
+  price_talk: '#FFF3E0',
+  livestock_advice: '#E8F5E9',
+  crop_disease: '#F3E5F5',
+  irrigation: '#E3F2FD',
+  buy_sell: '#FFF8E1',
+  general: '#F5F5F5',
+};
+
+const AVATAR_PALETTE = ['#B3E5FC', '#C8E6C9', '#FFF9C4', '#FFCCBC', '#E1BEE7', '#B2EBF2'];
+
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+const timeAgo = (iso: string): string => {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days = Math.floor(diff / 86_400_000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${days}d ago`;
+};
+
+const avatarColor = (name: string): string => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
+  return AVATAR_PALETTE[Math.abs(h) % AVATAR_PALETTE.length];
+};
+
+const initial = (name: string) => (name?.[0] ?? '?').toUpperCase();
+
+// ─── TabBar ───────────────────────────────────────────────────────────────────
 
 function TabBar({ active }: { active: string }) {
   const nav = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const tabs = [
-    { key: "Home", icon: "🏠", route: Routes.Dashboard },
-    { key: "Land", icon: "🗺️", route: Routes.Satellite },
-    { key: "Crop", icon: "🌱", route: Routes.DiseaseDetection },
-    { key: "Water", icon: "💧", route: Routes.Irrigation },
-    { key: "Livestock", icon: "🐄", route: Routes.Livestock },
-    { key: "Community", icon: "👥", route: Routes.Community },
-    { key: "Alerts", icon: "🔔", route: Routes.Alerts },
+    { key: 'Home', icon: '🏠', route: Routes.Dashboard },
+    { key: 'Land', icon: '🗺️', route: Routes.Satellite },
+    { key: 'Crop', icon: '🌱', route: Routes.DiseaseDetection },
+    { key: 'Water', icon: '💧', route: Routes.Irrigation },
+    { key: 'Livestock', icon: '🐄', route: Routes.Livestock },
+    { key: 'Prices', icon: '📈', route: Routes.MarketPrices },
+    { key: 'Community', icon: '👥', route: Routes.Community },
+    { key: 'Alerts', icon: '🔔', route: Routes.Alerts },
   ];
   return (
     <View style={[styles.tabBar, { paddingBottom: insets.bottom + 8 }]}>
@@ -88,15 +93,276 @@ function TabBar({ active }: { active: string }) {
   );
 }
 
-export function CommunityScreen() {
-  const insets = useSafeAreaInsets();
-  const [search, setSearch] = useState("");
-  const [selectedFilter, setSelectedFilter] = useState("All");
-  const { colors } = useTheme();
+// ─── PostCard ─────────────────────────────────────────────────────────────────
+
+interface PostCardProps {
+  post: Post;
+  onPress: () => void;
+  onLike: () => void;
+  onDelete: () => void;
+  truncate?: boolean;
+}
+
+function PostCard({ post, onPress, onLike, onDelete, truncate = true }: PostCardProps) {
+  const cat = CATEGORY_MAP[post.category];
+  const bg = CATEGORY_BG[post.category] ?? '#F5F5F5';
+  const isLong = post.content.length > 140;
 
   return (
+    <Pressable style={styles.postCard} onPress={onPress}>
+      {/* header row */}
+      <View style={styles.postHeader}>
+        <View style={[styles.avatar, { backgroundColor: avatarColor(post.user_display_name) }]}>
+          <Text style={styles.avatarText}>{initial(post.user_display_name)}</Text>
+        </View>
+        <View style={styles.postMeta}>
+          <Text style={styles.postAuthor}>{post.user_display_name}</Text>
+          <View style={[styles.catPill, { backgroundColor: bg }]}>
+            <Text style={styles.catPillText}>
+              {cat?.emoji ?? ''} {cat?.label ?? post.category}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.postRight}>
+          <Text style={styles.postTime}>{timeAgo(post.created_at)}</Text>
+          {post.is_mine && (
+            <Pressable
+              style={styles.moreBtn}
+              onPress={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.moreBtnText}>⋯</Text>
+            </Pressable>
+          )}
+        </View>
+      </View>
+
+      {/* content */}
+      <Text
+        style={styles.postContent}
+        numberOfLines={truncate ? 3 : undefined}
+      >
+        {post.content}
+      </Text>
+      {truncate && isLong && (
+        <Text style={styles.readMore}>read more</Text>
+      )}
+
+      {/* media */}
+      {post.media_url ? (
+        <Image source={{ uri: post.media_url }} style={styles.postMedia} resizeMode="cover" />
+      ) : null}
+
+      {/* action row */}
+      <View style={styles.actionRow}>
+        <Pressable
+          style={styles.actionBtn}
+          onPress={(e) => {
+            e.stopPropagation();
+            onLike();
+          }}
+          hitSlop={8}
+        >
+          <Text style={[styles.actionIcon, post.liked_by_me && styles.actionIconLiked]}>
+            {post.liked_by_me ? '👍' : '👍'}
+          </Text>
+          <Text style={[styles.actionCount, post.liked_by_me && styles.actionCountLiked]}>
+            {post.likes_count}
+          </Text>
+        </Pressable>
+        <Pressable style={styles.actionBtn} onPress={onPress} hitSlop={8}>
+          <Text style={styles.actionIcon}>💬</Text>
+          <Text style={styles.actionCount}>{post.comments_count}</Text>
+        </Pressable>
+      </View>
+    </Pressable>
+  );
+}
+
+// ─── CommentRow ───────────────────────────────────────────────────────────────
+
+function CommentRow({
+  comment,
+  onDelete,
+}: {
+  comment: Comment;
+  onDelete: () => void;
+}) {
+  return (
+    <Pressable
+      style={styles.commentRow}
+      onLongPress={comment.is_mine ? onDelete : undefined}
+      delayLongPress={400}
+    >
+      <View style={styles.commentTop}>
+        <View style={[styles.avatarSm, { backgroundColor: avatarColor(comment.user_display_name) }]}>
+          <Text style={styles.avatarSmText}>{initial(comment.user_display_name)}</Text>
+        </View>
+        <Text style={styles.commentAuthor}>{comment.user_display_name}</Text>
+        <Text style={styles.commentTime}>{timeAgo(comment.created_at)}</Text>
+      </View>
+      <Text style={styles.commentContent}>{comment.content}</Text>
+    </Pressable>
+  );
+}
+
+// ─── CommunityScreen ──────────────────────────────────────────────────────────
+
+export function CommunityScreen() {
+  const insets = useSafeAreaInsets();
+  const { colors } = useTheme();
+
+  const store = useCommunityStore();
+  const {
+    posts,
+    selectedPost,
+    comments,
+    categories,
+    activeCategory,
+    loading,
+    commentsLoading,
+    submitting,
+    hasMore,
+    page,
+  } = store;
+
+  const [view, setView] = useState<'feed' | 'post_detail'>('feed');
+  const [showModal, setShowModal] = useState(false);
+
+  // new-post form
+  const [postContent, setPostContent] = useState('');
+  const [postCategory, setPostCategory] = useState<string | null>(null);
+  const [pickedImageUri, setPickedImageUri] = useState<string | null>(null);
+
+  // comment input
+  const [commentText, setCommentText] = useState('');
+  const commentInputRef = useRef<TextInput>(null);
+
+  const displayCategories =
+    categories.length > 0
+      ? categories
+      : Object.entries(CATEGORY_MAP).map(([key, val]) => ({ key, ...val }));
+
+  useEffect(() => {
+    store.fetchCategories();
+    store.fetchFeed(true);
+  }, []);
+
+  // ── navigation helpers ──────────────────────────────────────────────────────
+
+  const openPostDetail = useCallback(
+    (post: Post) => {
+      store.selectPost(post);
+      store.fetchComments(post.id);
+      setView('post_detail');
+    },
+    [store],
+  );
+
+  const handleBack = () => {
+    setView('feed');
+    store.selectPost(null);
+    setCommentText('');
+  };
+
+  // ── post actions ────────────────────────────────────────────────────────────
+
+  const confirmDeletePost = (post_id: string) => {
+    Alert.alert('Delete Post', 'Are you sure you want to delete this post?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          store.removePost(post_id);
+          if (view === 'post_detail') handleBack();
+        },
+      },
+    ]);
+  };
+
+  const confirmDeleteComment = (post_id: string, comment_id: string) => {
+    Alert.alert('Delete Comment', 'Delete this comment?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => store.removeComment(post_id, comment_id),
+      },
+    ]);
+  };
+
+  // ── new post modal ──────────────────────────────────────────────────────────
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow Agrio to access your photos to add images.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      setPickedImageUri(result.assets[0].uri);
+    }
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setPostContent('');
+    setPostCategory(null);
+    setPickedImageUri(null);
+  };
+
+  const handleSubmitPost = async () => {
+    if (!postContent.trim() || !postCategory) return;
+    let mediaUrl: string | undefined;
+    if (pickedImageUri) {
+      try {
+        mediaUrl = await communityApi.uploadPostImage(pickedImageUri);
+      } catch {
+        Alert.alert('Upload failed', 'Could not upload image. Try posting without a photo?');
+        return;
+      }
+    }
+    try {
+      await store.submitPost(postContent.trim(), postCategory, mediaUrl);
+      closeModal();
+    } catch {
+      // error visible in store.error; Alert shown below
+      Alert.alert('Error', store.error ?? 'Could not create post.');
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    if (!commentText.trim() || !selectedPost) return;
+    const text = commentText.trim();
+    setCommentText('');
+    try {
+      await store.submitComment(selectedPost.id, text);
+    } catch {
+      setCommentText(text);
+    }
+  };
+
+  // ── render: feed ────────────────────────────────────────────────────────────
+
+  const renderFeed = () => (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.headerBorder }]}>
+      {/* header */}
+      <View
+        style={[
+          styles.header,
+          { paddingTop: insets.top + 8, backgroundColor: colors.background, borderBottomColor: colors.headerBorder },
+        ]}
+      >
         <TouchableOpacity onPress={() => useDrawerStore.getState().openDrawer()}>
           <Text style={styles.hamburger}>☰</Text>
         </TouchableOpacity>
@@ -104,180 +370,578 @@ export function CommunityScreen() {
           <Text style={styles.logoIcon}>🌿</Text>
           <Text style={styles.logoText}>Agrio</Text>
         </View>
-        <Text style={styles.headerRight}>Community</Text>
+        <View style={styles.headerTitleBlock}>
+          <Text style={styles.headerTitle}>Community</Text>
+          <Text style={styles.headerSubtitle}>المجتمع</Text>
+        </View>
+        <Pressable onPress={() => setShowModal(true)} hitSlop={8} style={styles.composeBtn}>
+          <Text style={styles.composeBtnText}>✏️</Text>
+        </Pressable>
       </View>
 
+      {/* category filter bar */}
       <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 24 + 80 }]}
-        showsVerticalScrollIndicator={false}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterBar}
+        contentContainerStyle={styles.filterBarContent}
       >
-        {/* Search + Add */}
-        <View style={styles.searchRow}>
-          <View style={styles.searchWrap}>
-            <Text style={styles.searchIcon}>🔍</Text>
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search discussions..."
-              placeholderTextColor="#999"
-              value={search}
-              onChangeText={setSearch}
-            />
+        <Pressable
+          style={[styles.chip, activeCategory === null && styles.chipActive]}
+          onPress={() => store.setCategory(null)}
+        >
+          <View style={styles.chipInner}>
+            <Text style={styles.chipEmoji}>🌍</Text>
+            <Text style={[styles.chipText, activeCategory === null && styles.chipTextActive]}>
+              {' '}All
+            </Text>
           </View>
-          <TouchableOpacity style={styles.addBtn} onPress={() => {}}>
-            <Text style={styles.addBtnText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Filter tags */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filtersScroll} contentContainerStyle={styles.filtersContent}>
-          {FILTERS.map((f) => (
-            <Pressable
-              key={f}
-              style={[styles.filterTag, selectedFilter === f && styles.filterTagActive]}
-              onPress={() => setSelectedFilter(f)}
-            >
-              <Text style={[styles.filterTagText, selectedFilter === f && styles.filterTagTextActive]}>{f}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        {/* Discussion posts */}
-        {POSTS.map((p) => (
-          <View key={p.id} style={styles.postCard}>
-            <View style={styles.postHeader}>
-              <View style={[styles.avatar, { backgroundColor: p.avatarColor }]}>
-                <Text style={styles.avatarText}>{p.initials}</Text>
-              </View>
-              <View style={styles.postMeta}>
-                <Text style={styles.postAuthor}>{p.author}</Text>
-                <Text style={styles.postTime}>{p.time}</Text>
-              </View>
-              <View style={[styles.categoryTag, { backgroundColor: p.categoryColor }]}>
-                <Text style={styles.categoryTagText}>{p.category}</Text>
-              </View>
+        </Pressable>
+        {displayCategories.map((cat) => (
+          <Pressable
+            key={cat.key}
+            style={[styles.chip, activeCategory === cat.key && styles.chipActive]}
+            onPress={() => store.setCategory(cat.key)}
+          >
+            <View style={styles.chipInner}>
+              <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+              <Text style={[styles.chipText, activeCategory === cat.key && styles.chipTextActive]}>
+                {' '}{cat.label}
+              </Text>
             </View>
-            <Text style={styles.postTitle}>{p.title}</Text>
-            <Text style={styles.postBody}>{p.body}</Text>
-            <View style={styles.postFooter}>
-              <View style={styles.engagement}>
-                <Text style={styles.engagementIcon}>👍</Text>
-                <Text style={styles.engagementCount}>{p.likes}</Text>
-              </View>
-              <View style={styles.engagement}>
-                <Text style={styles.engagementIcon}>💬</Text>
-                <Text style={styles.engagementCount}>{p.comments}</Text>
-              </View>
-              <Text style={styles.chevron}>⌄</Text>
-            </View>
-          </View>
+          </Pressable>
         ))}
       </ScrollView>
+
+      {/* post list */}
+      <FlatList
+        data={posts}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <PostCard
+            post={item}
+            onPress={() => openPostDetail(item)}
+            onLike={() => store.likePost(item.id)}
+            onDelete={() => confirmDeletePost(item.id)}
+            truncate
+          />
+        )}
+        onEndReached={store.loadMore}
+        onEndReachedThreshold={0.3}
+        onRefresh={() => store.fetchFeed(true)}
+        refreshing={loading && page === 0}
+        ListEmptyComponent={
+          loading ? (
+            <ActivityIndicator color={GREEN} style={{ marginTop: 60 }} />
+          ) : (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyEmoji}>🌱</Text>
+              <Text style={styles.emptyTitle}>No posts yet in this category</Text>
+              <Text style={styles.emptySubtitle}>
+                Be the first to share something with the community
+              </Text>
+            </View>
+          )
+        }
+        ListFooterComponent={
+          loading && page > 0 ? (
+            <ActivityIndicator color={GREEN} style={{ marginVertical: 16 }} />
+          ) : null
+        }
+        contentContainerStyle={{ paddingTop: 8, paddingBottom: 80 + 24 }}
+      />
 
       <TabBar active="Community" />
     </View>
   );
+
+  // ── render: post detail ─────────────────────────────────────────────────────
+
+  const renderDetail = () => {
+    if (!selectedPost) return null;
+    const post = selectedPost;
+
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        {/* detail header */}
+        <View
+          style={[
+            styles.detailHeader,
+            { paddingTop: insets.top + 4, backgroundColor: colors.background, borderBottomColor: colors.headerBorder },
+          ]}
+        >
+          <Pressable onPress={handleBack} style={styles.backBtn} hitSlop={8}>
+            <Text style={styles.backBtnText}>← Back</Text>
+          </Pressable>
+          <Text style={styles.detailHeaderTitle} numberOfLines={1}>
+            Post
+          </Text>
+          <View style={{ width: 64 }} />
+        </View>
+
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+          {/* comments + post list */}
+          <FlatList
+            style={{ flex: 1 }}
+            data={comments}
+            keyExtractor={(c) => c.id}
+            renderItem={({ item }) => (
+              <CommentRow
+                comment={item}
+                onDelete={() => confirmDeleteComment(post.id, item.id)}
+              />
+            )}
+            ListHeaderComponent={
+              <>
+                {/* full post card */}
+                <PostCard
+                  post={post}
+                  onPress={() => {}}
+                  onLike={() => store.likePost(post.id)}
+                  onDelete={() => confirmDeletePost(post.id)}
+                  truncate={false}
+                />
+                {/* comments title */}
+                <View style={styles.commentsHeader}>
+                  <Text style={styles.commentsHeaderText}>
+                    Comments ({post.comments_count})
+                  </Text>
+                </View>
+                {commentsLoading && (
+                  <ActivityIndicator color={GREEN} style={{ marginVertical: 20 }} />
+                )}
+              </>
+            }
+            ListEmptyComponent={
+              commentsLoading ? null : (
+                <View style={styles.emptyComments}>
+                  <Text style={styles.emptyCommentsText}>
+                    No comments yet. Be the first to reply.
+                  </Text>
+                </View>
+              )
+            }
+            contentContainerStyle={{ paddingBottom: 8 }}
+          />
+
+          {/* comment input bar */}
+          <View style={[styles.commentBar, { paddingBottom: insets.bottom || 8 }]}>
+            <TextInput
+              ref={commentInputRef}
+              style={styles.commentInput}
+              placeholder="Write a comment..."
+              placeholderTextColor="#999"
+              value={commentText}
+              onChangeText={setCommentText}
+              multiline
+              maxLength={500}
+              returnKeyType="send"
+              onSubmitEditing={handleSubmitComment}
+              blurOnSubmit={false}
+            />
+            <Pressable
+              style={[styles.sendBtn, !commentText.trim() && styles.sendBtnDisabled]}
+              onPress={handleSubmitComment}
+              disabled={!commentText.trim() || submitting}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.sendBtnText}>↑</Text>
+              )}
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      </View>
+    );
+  };
+
+  // ── render: new post modal ──────────────────────────────────────────────────
+
+  const renderModal = () => (
+    <>
+      <Pressable style={styles.backdrop} onPress={closeModal} />
+      <KeyboardAvoidingView behavior="padding" style={styles.sheetWrapper}>
+        <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 20 }]}>
+          <View style={styles.modalHandle} />
+
+          {/* modal header */}
+          <View style={styles.modalTitleRow}>
+            <Text style={styles.modalTitleText}>New Post</Text>
+            <Pressable onPress={closeModal} hitSlop={8}>
+              <Text style={styles.modalCloseText}>✕</Text>
+            </Pressable>
+          </View>
+
+          {/* category chips */}
+          <Text style={styles.fieldLabel}>Category</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.modalChipScroll}
+            contentContainerStyle={styles.modalChipRow}
+          >
+            {displayCategories.map((cat) => (
+              <Pressable
+                key={cat.key}
+                style={[styles.chip, postCategory === cat.key && styles.chipActive]}
+                onPress={() => setPostCategory(cat.key)}
+              >
+                <View style={styles.chipInner}>
+                  <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+                  <Text style={[styles.chipText, postCategory === cat.key && styles.chipTextActive]}>
+                    {' '}{cat.label}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </ScrollView>
+
+          {/* content input */}
+          <Text style={styles.fieldLabel}>Content</Text>
+          <TextInput
+            style={styles.contentInput}
+            placeholder="Share advice, ask a question, or start a discussion..."
+            placeholderTextColor="#999"
+            multiline
+            maxLength={1000}
+            value={postContent}
+            onChangeText={setPostContent}
+            textAlignVertical="top"
+          />
+          <Text style={styles.charCounter}>{postContent.length}/1000</Text>
+
+          {/* photo row */}
+          <View style={styles.photoRow}>
+            <Pressable style={styles.photoBtn} onPress={pickImage}>
+              <Text style={styles.photoBtnText}>📷 Add Photo</Text>
+            </Pressable>
+            {pickedImageUri && (
+              <View style={styles.thumbnailWrap}>
+                <Image source={{ uri: pickedImageUri }} style={styles.thumbnail} />
+                <Pressable
+                  style={styles.thumbnailRemove}
+                  onPress={() => setPickedImageUri(null)}
+                >
+                  <Text style={styles.thumbnailRemoveText}>✕</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+
+          {/* post button */}
+          <Pressable
+            style={[
+              styles.postBtn,
+              (!postContent.trim() || !postCategory || submitting) && styles.postBtnDisabled,
+            ]}
+            onPress={handleSubmitPost}
+            disabled={!postContent.trim() || !postCategory || submitting}
+          >
+            {submitting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.postBtnText}>Post</Text>
+            )}
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+    </>
+  );
+
+  // ── main render ─────────────────────────────────────────────────────────────
+
+  return (
+    <View style={{ flex: 1 }}>
+      {view === 'feed' ? renderFeed() : renderDetail()}
+      {showModal && renderModal()}
+    </View>
+  );
 }
 
+// ─── styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: OFFSET_WHITE },
+  container: { flex: 1 },
+
+  // header
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingBottom: 12,
-    backgroundColor: OFFSET_WHITE,
     borderBottomWidth: 1,
-    borderBottomColor: "#EEE",
   },
-  hamburger: { fontSize: 22, color: "#2C2C2C" },
-  headerCenter: { flexDirection: "row", alignItems: "center" },
-  logoIcon: { fontSize: 24, marginRight: 6 },
-  logoText: { fontSize: 20, fontWeight: "700", color: GREEN },
-  headerRight: { fontSize: 14, color: "#666", fontWeight: "500" },
-  scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 24, paddingTop: 20 },
-  searchRow: { flexDirection: "row", alignItems: "center", marginBottom: 16 },
-  searchWrap: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#EEE",
-    paddingHorizontal: 14,
-    height: 48,
-  },
-  searchIcon: { fontSize: 18, marginRight: 10 },
-  searchInput: { flex: 1, fontSize: 15, color: "#2C2C2C", paddingVertical: 0 },
-  addBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: GREEN,
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
-  },
-  addBtnText: { fontSize: 28, color: "#FFF", fontWeight: "300", lineHeight: 32 },
-  filtersScroll: { marginBottom: 20 },
-  filtersContent: { paddingRight: 24 },
-  filterTag: {
+  hamburger: { fontSize: 22, color: '#2C2C2C', width: 32 },
+  headerCenter: { flexDirection: 'row', alignItems: 'center' },
+  logoIcon: { fontSize: 22, marginRight: 4 },
+  logoText: { fontSize: 18, fontWeight: '700', color: GREEN },
+  headerTitleBlock: { alignItems: 'center' },
+  headerTitle: { fontSize: 15, fontWeight: '700', color: '#2C2C2C' },
+  headerSubtitle: { fontSize: 10, color: '#888', marginTop: 1 },
+  composeBtn: { padding: 4 },
+  composeBtnText: { fontSize: 22 },
+
+  // category filter bar
+  filterBar: { flexShrink: 0 },
+  filterBarContent: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: "#EEE",
-    marginRight: 8,
+    paddingTop: 8,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  filterTagActive: { backgroundColor: "#BDBDBD" },
-  filterTagText: { fontSize: 14, color: "#555" },
-  filterTagTextActive: { color: "#2C2C2C", fontWeight: "600" },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#DDD',
+    marginRight: 8,
+    backgroundColor: '#FFF',
+  },
+  chipActive: { backgroundColor: GREEN, borderColor: GREEN },
+  chipInner: { flexDirection: 'row', alignItems: 'center' },
+  chipEmoji: { fontSize: 13, lineHeight: 18 },
+  chipText: { fontSize: 13, color: '#555', lineHeight: 18 },
+  chipTextActive: { color: '#FFF', fontWeight: '600' },
+
+  // post card
   postCard: {
-    backgroundColor: "#FFF",
+    backgroundColor: '#FFF',
     borderRadius: 16,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: "#EEE",
+    borderColor: '#EEE',
+    marginHorizontal: 16,
   },
-  postHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
-  avatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", marginRight: 10 },
-  avatarText: { fontSize: 14, fontWeight: "700", color: "#37474F" },
-  postMeta: { flex: 1 },
-  postAuthor: { fontSize: 14, fontWeight: "600", color: "#2C2C2C" },
-  postTime: { fontSize: 12, color: "#666", marginTop: 2 },
-  categoryTag: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
-  categoryTagText: { fontSize: 12, fontWeight: "600", color: "#37474F" },
-  postTitle: { fontSize: 16, fontWeight: "700", color: "#2C2C2C", marginBottom: 8 },
-  postBody: { fontSize: 14, color: "#555", lineHeight: 22, marginBottom: 12 },
-  postFooter: { flexDirection: "row", alignItems: "center" },
-  engagement: { flexDirection: "row", alignItems: "center", marginRight: 16 },
-  engagementIcon: { fontSize: 16, marginRight: 4 },
-  engagementCount: { fontSize: 13, color: "#666" },
-  chevron: { marginLeft: "auto", fontSize: 18, color: "#999" },
-  tabBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    paddingTop: 12,
-    paddingHorizontal: 8,
-    backgroundColor: "#FFF",
-    borderTopWidth: 1,
-    borderTopColor: "#EEE",
-  },
-  tabItem: { alignItems: "center", flex: 1 },
-  tabIconWrap: {
+  postHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 },
+  avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  avatarText: { fontSize: 15, fontWeight: '700', color: '#37474F' },
+  postMeta: { flex: 1 },
+  postAuthor: { fontSize: 14, fontWeight: '600', color: '#2C2C2C', marginBottom: 3 },
+  catPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, alignSelf: 'flex-start' },
+  catPillText: { fontSize: 11, fontWeight: '600', color: '#333' },
+  postRight: { alignItems: 'flex-end', gap: 4 },
+  postTime: { fontSize: 11, color: '#999' },
+  moreBtn: { padding: 2 },
+  moreBtnText: { fontSize: 18, color: '#999', letterSpacing: 1 },
+  postContent: { fontSize: 14, color: '#333', lineHeight: 22, marginBottom: 8 },
+  readMore: { fontSize: 13, color: GREEN, marginBottom: 8, fontWeight: '500' },
+  postMedia: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10 },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
+  },
+  actionBtn: { flexDirection: 'row', alignItems: 'center', marginRight: 20 },
+  actionIcon: { fontSize: 16, opacity: 0.5 },
+  actionIconLiked: { opacity: 1 },
+  actionCount: { fontSize: 13, color: '#666', marginLeft: 5 },
+  actionCountLiked: { color: '#1976D2', fontWeight: '600' },
+
+  // empty state
+  emptyState: { alignItems: 'center', paddingTop: 60, paddingHorizontal: 32 },
+  emptyEmoji: { fontSize: 48, marginBottom: 16 },
+  emptyTitle: { fontSize: 17, fontWeight: '600', color: '#333', marginBottom: 8, textAlign: 'center' },
+  emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', lineHeight: 22 },
+
+  // tab bar
+  tabBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingTop: 10,
+    paddingHorizontal: 4,
+    backgroundColor: '#FFF',
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+  },
+  tabItem: { alignItems: 'center', flex: 1 },
+  tabIconWrap: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
+  tabIconWrapActive: { backgroundColor: GREEN_LIGHT },
+  tabIcon: { fontSize: 18 },
+  tabLabel: { fontSize: 9, color: '#666' },
+  tabLabelActive: { color: GREEN, fontWeight: '600' },
+
+  // detail view
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+  },
+  backBtn: { padding: 6, width: 64 },
+  backBtnText: { fontSize: 15, color: GREEN, fontWeight: '500' },
+  detailHeaderTitle: { flex: 1, fontSize: 16, fontWeight: '600', color: '#2C2C2C', textAlign: 'center' },
+
+  commentsHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  commentsHeaderText: { fontSize: 15, fontWeight: '600', color: '#2C2C2C' },
+
+  // comment row
+  commentRow: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F5F5F5',
+  },
+  commentTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 5 },
+  avatarSm: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  avatarSmText: { fontSize: 12, fontWeight: '700', color: '#37474F' },
+  commentAuthor: { flex: 1, fontSize: 13, fontWeight: '600', color: '#2C2C2C' },
+  commentTime: { fontSize: 11, color: '#999' },
+  commentContent: { fontSize: 14, color: '#333', lineHeight: 20, paddingLeft: 36 },
+
+  emptyComments: { padding: 32, alignItems: 'center' },
+  emptyCommentsText: { fontSize: 14, color: '#999', textAlign: 'center' },
+
+  // comment input bar
+  commentBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#EEE',
+    backgroundColor: '#FFF',
+  },
+  commentInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 22,
+    marginRight: 8,
+    maxHeight: 96,
+    color: '#2C2C2C',
+  },
+  sendBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: GREEN,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnDisabled: { backgroundColor: '#B0BEC5' },
+  sendBtnText: { fontSize: 18, color: '#FFF', fontWeight: '700' },
+
+  // modal
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 100,
+  },
+  sheetWrapper: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 101,
+  },
+  modalSheet: {
+    backgroundColor: '#FFF',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#DDD',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitleText: { fontSize: 18, fontWeight: '700', color: '#2C2C2C' },
+  modalCloseText: { fontSize: 20, color: '#666', paddingHorizontal: 4 },
+  fieldLabel: { fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 8 },
+  modalChipScroll: { marginBottom: 16 },
+  modalChipRow: { flexDirection: 'row', alignItems: 'center', paddingRight: 8, paddingVertical: 4 },
+
+  contentInput: {
+    height: 120,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 14,
+    lineHeight: 22,
+    color: '#2C2C2C',
     marginBottom: 4,
   },
-  tabIconWrapActive: { backgroundColor: GREEN_LIGHT },
-  tabIcon: { fontSize: 20 },
-  tabLabel: { fontSize: 10, color: "#666" },
-  tabLabelActive: { color: GREEN, fontWeight: "600" },
+  charCounter: { fontSize: 12, color: '#AAA', textAlign: 'right', marginBottom: 12 },
+
+  photoRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
+  photoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#DDD',
+    marginRight: 12,
+  },
+  photoBtnText: { fontSize: 14, color: '#555' },
+  thumbnailWrap: { position: 'relative' },
+  thumbnail: { width: 60, height: 60, borderRadius: 8 },
+  thumbnailRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#FF5252',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  thumbnailRemoveText: { fontSize: 10, color: '#FFF', fontWeight: '700' },
+
+  postBtn: {
+    backgroundColor: GREEN,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  postBtnDisabled: { backgroundColor: '#B0BEC5' },
+  postBtnText: { color: '#FFF', fontSize: 16, fontWeight: '600' },
 });

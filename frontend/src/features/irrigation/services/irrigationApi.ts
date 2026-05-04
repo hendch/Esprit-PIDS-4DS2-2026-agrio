@@ -6,7 +6,15 @@ export interface IrrigationDecisionResponse {
 
 export interface DashboardData {
   weather: any[] | null;
-  moisture: { moisture_percent: number; status: string; history?: any[] } | null;
+  moisture: {
+    moisture_percent: number;
+    status: string;
+    history?: any[];
+    mqtt_connected?: boolean;
+    live?: boolean;
+    topic?: string;
+    waited_for_message?: boolean;
+  } | null;
   usage_today: number | null;
   usage_history?: { history: any[]; water_saved_pct: number } | null;
 }

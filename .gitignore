@@ -25,3 +25,8 @@ backend/.env
 backend/.env.example
 frontend/.env
 frontend/.env.example
+# Firebase credentials - never commit these
+google-services.json
+*-firebase-adminsdk-*.json
+*.keystore
+*.jks

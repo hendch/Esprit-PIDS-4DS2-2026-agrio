@@ -1,40 +1,91 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  GestureResponderEvent,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
-import MapView, { MapPressEvent, Marker, Polygon, PROVIDER_GOOGLE } from "react-native-maps";
-import { useNavigation } from "@react-navigation/native";
+import MapView, {
+  LatLng as MapLatLng,
+  Marker,
+  Polygon,
+  Polyline,
+  PROVIDER_GOOGLE,
+  Region,
+} from "react-native-maps";
+import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Location from "expo-location";
 
 import { useTheme } from "../../core/theme/useTheme";
-import { saveFieldBoundary } from "./fieldBoundaryService";
+import {
+  FieldBoundaryRecord,
+  getFieldBoundary,
+  listFieldBoundaries,
+  saveFieldBoundary,
+  updateFieldBoundary,
+} from "./fieldBoundaryService";
+import {
+  SUPPORTED_CROPS,
+  normalizeCropName,
+  normalizeGovernorateName,
+} from "./fieldVocabulary";
 
 type LatLng = {
   latitude: number;
   longitude: number;
 };
 
-const INITIAL_REGION = {
-  latitude: 36.8065,
-  longitude: 10.1815,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
+type RouteParams = {
+  fieldId?: string;
 };
 
+const INITIAL_REGION: Region = {
+  latitude: 36.8065,
+  longitude: 10.1815,
+  latitudeDelta: 0.035,
+  longitudeDelta: 0.035,
+};
+
+const mapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#EEF2E6" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#394235" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#F8FAF2" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#B9C4B0" }] },
+  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#DDEDD2" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#FFFFFF" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#CAD4C0" }] },
+  { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#B9DCEB" }] },
+];
+
+const IRRIGATION_METHODS = [
+  "Drip",
+  "Sprinkler",
+  "Surface",
+  "Pivot",
+  "Rainfed / None",
+];
+
+const TAP_MAX_DISTANCE_PX = 12;
+const TAP_MAX_DURATION_MS = 260;
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
 function computeAreaHa(points: LatLng[]): number {
-  if (points.length < 3) {
-    return 0;
-  }
+  if (points.length < 3) return 0;
 
   const meanLatRad =
-    points.reduce((sum, point) => sum + (point.latitude * Math.PI) / 180, 0) / points.length;
+    points.reduce((sum, point) => sum + (point.latitude * Math.PI) / 180, 0) /
+    points.length;
+
   const metersPerDegLat = 111_132;
   const metersPerDegLon = 111_320 * Math.cos(meanLatRad);
 
@@ -42,30 +93,510 @@ function computeAreaHa(points: LatLng[]): number {
     x: point.longitude * metersPerDegLon,
     y: point.latitude * metersPerDegLat,
   }));
+
   const closed = [...coords, coords[0]];
 
   let areaM2 = 0;
-  for (let index = 0; index < coords.length; index += 1) {
-    areaM2 += closed[index].x * closed[index + 1].y - closed[index + 1].x * closed[index].y;
+  for (let i = 0; i < coords.length; i += 1) {
+    areaM2 += closed[i].x * closed[i + 1].y - closed[i + 1].x * closed[i].y;
   }
+
   return Math.abs(areaM2 / 2) / 10_000;
 }
 
+function computeCentroid(points: LatLng[]): LatLng | null {
+  if (points.length === 0) return null;
+
+  const latitude =
+    points.reduce((sum, point) => sum + point.latitude, 0) / points.length;
+  const longitude =
+    points.reduce((sum, point) => sum + point.longitude, 0) / points.length;
+
+  return { latitude, longitude };
+}
+
+function isPointInsidePolygon(point: LatLng, polygon: LatLng[]): boolean {
+  if (polygon.length < 3) {
+    return false;
+  }
+
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const currentPoint = polygon[index];
+    const previousPoint = polygon[previous];
+    const crossesLatitude =
+      currentPoint.latitude > point.latitude !== previousPoint.latitude > point.latitude;
+
+    if (!crossesLatitude) {
+      continue;
+    }
+
+    const intersectLongitude =
+      ((previousPoint.longitude - currentPoint.longitude) * (point.latitude - currentPoint.latitude)) /
+        (previousPoint.latitude - currentPoint.latitude) +
+      currentPoint.longitude;
+
+    if (point.longitude < intersectLongitude) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function orientation(a: LatLng, b: LatLng, c: LatLng): number {
+  return (b.longitude - a.longitude) * (c.latitude - a.latitude) - (b.latitude - a.latitude) * (c.longitude - a.longitude);
+}
+
+function isOnSegment(a: LatLng, b: LatLng, c: LatLng): boolean {
+  return (
+    Math.min(a.longitude, b.longitude) <= c.longitude &&
+    c.longitude <= Math.max(a.longitude, b.longitude) &&
+    Math.min(a.latitude, b.latitude) <= c.latitude &&
+    c.latitude <= Math.max(a.latitude, b.latitude)
+  );
+}
+
+function doSegmentsIntersect(a: LatLng, b: LatLng, c: LatLng, d: LatLng): boolean {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+  const epsilon = 0.000000001;
+
+  if (Math.abs(o1) < epsilon && isOnSegment(a, b, c)) return true;
+  if (Math.abs(o2) < epsilon && isOnSegment(a, b, d)) return true;
+  if (Math.abs(o3) < epsilon && isOnSegment(c, d, a)) return true;
+  if (Math.abs(o4) < epsilon && isOnSegment(c, d, b)) return true;
+
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+}
+
+function polygonOverlaps(newPolygon: LatLng[], existingPolygon: LatLng[]): boolean {
+  if (newPolygon.length < 3 || existingPolygon.length < 3) {
+    return false;
+  }
+
+  if (newPolygon.some((point) => isPointInsidePolygon(point, existingPolygon))) {
+    return true;
+  }
+  if (existingPolygon.some((point) => isPointInsidePolygon(point, newPolygon))) {
+    return true;
+  }
+
+  for (let newIndex = 0; newIndex < newPolygon.length; newIndex += 1) {
+    const newStart = newPolygon[newIndex];
+    const newEnd = newPolygon[(newIndex + 1) % newPolygon.length];
+    for (let existingIndex = 0; existingIndex < existingPolygon.length; existingIndex += 1) {
+      const existingStart = existingPolygon[existingIndex];
+      const existingEnd = existingPolygon[(existingIndex + 1) % existingPolygon.length];
+      if (doSegmentsIntersect(newStart, newEnd, existingStart, existingEnd)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function formatDateForApi(date: Date | null): string | undefined {
+  if (!date) return undefined;
+  return date.toISOString().slice(0, 10);
+}
+
+function formatDateForDisplay(date: Date | null): string {
+  if (!date) return "Select planting date";
+  return date.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function parseApiDate(value?: string): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day);
+}
+
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function sameDate(a: Date | null, b: Date): boolean {
+  return Boolean(
+    a &&
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate(),
+  );
+}
+
+function isAfterToday(date: Date): boolean {
+  return startOfDay(date).getTime() > startOfDay(new Date()).getTime();
+}
+
+function isSameOrAfterCurrentMonth(date: Date): boolean {
+  const today = new Date();
+  return (
+    date.getFullYear() > today.getFullYear() ||
+    (date.getFullYear() === today.getFullYear() && date.getMonth() >= today.getMonth())
+  );
+}
+
+function getCalendarMonthDays(monthDate: Date): Array<Date | null> {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells: Array<Date | null> = Array.from({ length: firstDay.getDay() }, () => null);
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    cells.push(new Date(year, month, day));
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  return cells;
+}
+
+function formatMonthTitle(date: Date): string {
+  return date.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+type PickerItem = {
+  label: string;
+  value: string;
+};
+
+type PickerModalProps = {
+  visible: boolean;
+  title: string;
+  options: PickerItem[] | string[];
+  searchable?: boolean;
+  onClose: () => void;
+  onSelect: (value: string) => void;
+};
+
+function PickerModal({
+  visible,
+  title,
+  options,
+  searchable = false,
+  onClose,
+  onSelect,
+}: PickerModalProps) {
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    if (!visible) {
+      setQuery("");
+    }
+  }, [visible]);
+
+  const normalizedOptions = useMemo(() => {
+    return options.map((item) =>
+      typeof item === "string" ? { label: item, value: item } : item,
+    );
+  }, [options]);
+
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !query.trim()) return normalizedOptions;
+
+    const q = query.trim().toLowerCase();
+
+    return normalizedOptions.filter(
+      (item) =>
+        item.label.toLowerCase().includes(q) ||
+        item.value.toLowerCase().includes(q),
+    );
+  }, [normalizedOptions, query, searchable]);
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>{title}</Text>
+            <TouchableOpacity onPress={onClose}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          {searchable ? (
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search..."
+              placeholderTextColor="#777"
+              style={styles.modalSearchInput}
+            />
+          ) : null}
+
+          <ScrollView style={styles.modalList}>
+            {filteredOptions.map((item) => (
+              <Pressable
+                key={`${item.value}:${item.label}`}
+                style={styles.modalOption}
+                onPress={() => {
+                  onSelect(item.value);
+                  onClose();
+                }}
+              >
+                <Text style={styles.modalOptionText}>{item.label}</Text>
+              </Pressable>
+            ))}
+
+            {filteredOptions.length === 0 ? (
+              <Text style={styles.modalEmpty}>No results</Text>
+            ) : null}
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export function FieldBoundarySetupScreen() {
-  const nav = useNavigation();
+  const nav = useNavigation<any>();
+  const route = useRoute();
   const insets = useSafeAreaInsets();
   const { colors } = useTheme();
+  const params = route.params as RouteParams | undefined;
+  const editingFieldId = params?.fieldId;
+  const isEditMode = Boolean(editingFieldId);
+
+  const mapRef = useRef<MapView | null>(null);
+  const tapGestureRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
+
+  const [region, setRegion] = useState<Region>(INITIAL_REGION);
 
   const [fieldName, setFieldName] = useState("");
   const [cropType, setCropType] = useState("");
+  const [governorate, setGovernorate] = useState("");
+  const [plantingDate, setPlantingDate] = useState<Date | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(startOfDay(new Date()));
+  const [irrigated, setIrrigated] = useState(false);
+  const [irrigationMethod, setIrrigationMethod] = useState("");
+  const [fieldNotes, setFieldNotes] = useState("");
+
+  const [cropModalVisible, setCropModalVisible] = useState(false);
+  const [irrigationModalVisible, setIrrigationModalVisible] = useState(false);
+
+  const [mapType, setMapType] = useState<"standard" | "hybrid">("hybrid");
   const [points, setPoints] = useState<LatLng[]>([]);
+  const [lockedFields, setLockedFields] = useState<FieldBoundaryRecord[]>([]);
+  const [lockedFieldsError, setLockedFieldsError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingEditField, setIsLoadingEditField] = useState(false);
+  const [isResolvingGovernorate, setIsResolvingGovernorate] = useState(false);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
 
   const areaHa = useMemo(() => computeAreaHa(points), [points]);
+  const centroid = useMemo(() => computeCentroid(points), [points]);
+  const savedAreaHa = useMemo(
+    () => lockedFields.reduce((sum, field) => sum + (field.areaHa ?? computeAreaHa(field.points)), 0),
+    [lockedFields],
+  );
+  const drawingLine = points.length > 1 ? points : [];
+  const calendarDays = useMemo(() => getCalendarMonthDays(calendarMonth), [calendarMonth]);
 
-  const addPoint = (event: MapPressEvent) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    setPoints((current) => [...current, { latitude, longitude }]);
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        setLocationPermissionGranted(status === "granted");
+      } catch (error) {
+        console.error("Location permission request failed:", error);
+        setLocationPermissionGranted(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadLockedFields() {
+      try {
+        setLockedFieldsError(null);
+        const fields = await listFieldBoundaries();
+        if (isMounted) {
+          setLockedFields(fields.filter((field) => field.points.length >= 3));
+        }
+      } catch {
+        if (isMounted) {
+          setLockedFieldsError("Saved fields could not be loaded. Existing field areas are not available on the map.");
+        }
+      }
+    }
+
+    void loadLockedFields();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadFieldForEditing() {
+      if (!editingFieldId) {
+        return;
+      }
+
+      try {
+        setIsLoadingEditField(true);
+        const record = await getFieldBoundary(editingFieldId);
+        if (!isMounted) {
+          return;
+        }
+
+        setFieldName(record.name);
+        setCropType(record.cropType || "");
+        setGovernorate(record.governorate || "");
+        setPlantingDate(parseApiDate(record.plantingDate));
+        setIrrigated(record.irrigated);
+        setIrrigationMethod(record.irrigationMethod || "");
+        setFieldNotes(record.fieldNotes || "");
+        setPoints(record.points);
+
+        if (record.centroidLat != null && record.centroidLon != null) {
+          moveMapTo(record.centroidLat, record.centroidLon, 0.02, 0.02);
+        } else if (record.points[0]) {
+          moveMapTo(record.points[0].latitude, record.points[0].longitude, 0.02, 0.02);
+        }
+      } catch (error) {
+        console.error("Failed to load field for editing:", error);
+        if (isMounted) {
+          Alert.alert("Field unavailable", "Could not load this field for editing.");
+          nav.goBack();
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingEditField(false);
+        }
+      }
+    }
+
+    void loadFieldForEditing();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [editingFieldId, nav]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function fillGovernorateFromCentroid() {
+      if (!centroid || points.length < 3) return;
+
+      try {
+        setIsResolvingGovernorate(true);
+
+        const results = await Location.reverseGeocodeAsync({
+          latitude: centroid.latitude,
+          longitude: centroid.longitude,
+        });
+
+        if (!isMounted) return;
+
+        const first = results[0];
+        if (first) {
+          const guessedGovernorate =
+            first.region || first.subregion || first.city || governorate;
+
+          if (guessedGovernorate) {
+            setGovernorate(normalizeGovernorateName(guessedGovernorate));
+          }
+        }
+      } catch (error) {
+        console.error("Reverse geocoding failed:", error);
+      } finally {
+        if (isMounted) {
+          setIsResolvingGovernorate(false);
+        }
+      }
+    }
+
+    void fillGovernorateFromCentroid();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [centroid, points.length, governorate]);
+
+  const addCoordinate = (coordinate: LatLng) => {
+    const { latitude, longitude } = coordinate;
+    const nextPoint = { latitude, longitude };
+    const touchedLockedField = lockedFields.find(
+      (field) => field.id !== editingFieldId && isPointInsidePolygon(nextPoint, field.points),
+    );
+    if (touchedLockedField) {
+      Alert.alert(
+        "Field already saved",
+        `${touchedLockedField.name} is locked on the map. Delete that field before drawing in this area again.`,
+      );
+      return;
+    }
+
+    setPoints((current) => [...current, nextPoint]);
+  };
+
+  const onMapTouchStart = (event: GestureResponderEvent) => {
+    tapGestureRef.current = {
+      x: event.nativeEvent.locationX,
+      y: event.nativeEvent.locationY,
+      startedAt: Date.now(),
+      moved: false,
+    };
+  };
+
+  const onMapTouchMove = (event: GestureResponderEvent) => {
+    const gesture = tapGestureRef.current;
+    if (!gesture) {
+      return;
+    }
+
+    const deltaX = event.nativeEvent.locationX - gesture.x;
+    const deltaY = event.nativeEvent.locationY - gesture.y;
+    if (Math.hypot(deltaX, deltaY) > TAP_MAX_DISTANCE_PX) {
+      gesture.moved = true;
+    }
+  };
+
+  const onMapTouchEnd = async (event: GestureResponderEvent) => {
+    const gesture = tapGestureRef.current;
+    tapGestureRef.current = null;
+    if (!gesture || gesture.moved || Date.now() - gesture.startedAt > TAP_MAX_DURATION_MS) {
+      return;
+    }
+
+    try {
+      const coordinate = await mapRef.current?.coordinateForPoint({
+        x: event.nativeEvent.locationX,
+        y: event.nativeEvent.locationY,
+      });
+      if (coordinate) {
+        addCoordinate(coordinate);
+      }
+    } catch {
+      Alert.alert("Map tap failed", "Could not read this map position. Try tapping again after the map finishes moving.");
+    }
   };
 
   const undoPoint = () => {
@@ -76,28 +607,150 @@ export function FieldBoundarySetupScreen() {
     setPoints([]);
   };
 
+  const moveMapTo = (
+    latitude: number,
+    longitude: number,
+    latitudeDelta = 0.03,
+    longitudeDelta = 0.03,
+  ) => {
+    const nextRegion: Region = {
+      latitude,
+      longitude,
+      latitudeDelta,
+      longitudeDelta,
+    };
+
+    setRegion(nextRegion);
+    mapRef.current?.animateToRegion(nextRegion, 700);
+  };
+
+  const zoomByFactor = (factor: number) => {
+    const nextRegion: Region = {
+      ...region,
+      latitudeDelta: Math.max(0.002, Math.min(region.latitudeDelta * factor, 40)),
+      longitudeDelta: Math.max(0.002, Math.min(region.longitudeDelta * factor, 40)),
+    };
+
+    setRegion(nextRegion);
+    mapRef.current?.animateToRegion(nextRegion, 250);
+  };
+
+  const handleUseCurrentLocation = async () => {
+    try {
+      if (!locationPermissionGranted) {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        const granted = status === "granted";
+        setLocationPermissionGranted(granted);
+
+        if (!granted) {
+          Alert.alert(
+            "Location permission denied",
+            "Please allow location access to use the current location button.",
+          );
+          return;
+        }
+      }
+
+      const current = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+
+      moveMapTo(current.coords.latitude, current.coords.longitude, 0.02, 0.02);
+    } catch (error) {
+      console.error("Current location failed:", error);
+      Alert.alert(
+        "Location unavailable",
+        "Could not get the current location. On the emulator, set a Tunisia location in Extended controls → Location first.",
+      );
+    }
+  };
+
+  const openDatePicker = () => {
+    setCalendarMonth(startOfDay(plantingDate || new Date()));
+    setShowDatePicker(true);
+  };
+
+  const shiftCalendarMonth = (offset: number) => {
+    setCalendarMonth((current) => {
+      const next = new Date(current.getFullYear(), current.getMonth() + offset, 1);
+      return isSameOrAfterCurrentMonth(next) ? startOfDay(new Date()) : next;
+    });
+  };
+
+  const selectPlantingDate = (date: Date) => {
+    setPlantingDate(startOfDay(date));
+    setShowDatePicker(false);
+  };
+
   const onSave = async () => {
     if (!fieldName.trim()) {
       Alert.alert("Missing field name", "Please provide a field name before saving.");
       return;
     }
+
+    if (!cropType.trim()) {
+      Alert.alert("Missing crop type", "Please select a crop before saving.");
+      return;
+    }
+
     if (points.length < 3) {
       Alert.alert("Boundary too small", "Add at least 3 points to create a valid field boundary.");
       return;
     }
 
+    if (irrigated && !irrigationMethod.trim()) {
+      Alert.alert(
+        "Missing irrigation method",
+        "Please choose the irrigation method if this field is irrigated.",
+      );
+      return;
+    }
+
+    const overlappingField = lockedFields.find(
+      (field) => field.id !== editingFieldId && polygonOverlaps(points, field.points),
+    );
+    if (overlappingField) {
+      Alert.alert(
+        "Boundary overlaps a saved field",
+        `${overlappingField.name} is already saved. Delete it before reusing that area.`,
+      );
+      return;
+    }
+
     try {
       setIsSaving(true);
-      await saveFieldBoundary({
+
+      const payload = {
         name: fieldName.trim(),
-        cropType: cropType.trim() || undefined,
+        cropType: normalizeCropName(cropType) || undefined,
         areaHa,
         points,
-      });
-      Alert.alert("Saved", "Field boundary saved successfully.");
+        governorate: normalizeGovernorateName(governorate) || undefined,
+        plantingDate: formatDateForApi(plantingDate),
+        irrigated,
+        irrigationMethod:
+          irrigated && irrigationMethod !== "Rainfed / None"
+            ? irrigationMethod.trim()
+            : undefined,
+        fieldNotes: fieldNotes.trim() || undefined,
+      };
+
+      if (editingFieldId) {
+        await updateFieldBoundary(editingFieldId, payload);
+      } else {
+        await saveFieldBoundary(payload);
+      }
+
+      Alert.alert(
+        editingFieldId ? "Updated" : "Saved",
+        editingFieldId
+          ? "Field boundary and profile updated successfully."
+          : "Field boundary and profile saved successfully.",
+      );
       nav.goBack();
-    } catch {
-      Alert.alert("Save failed", "Could not save the boundary. Please check your network and try again.");
+    } catch (error) {
+      console.error("Save failed:", error);
+      Alert.alert("Save failed", "Could not save the field. Please check your network and try again.");
     } finally {
       setIsSaving(false);
     }
@@ -105,55 +758,147 @@ export function FieldBoundarySetupScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.header, { paddingTop: insets.top + 8, borderBottomColor: colors.headerBorder }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: insets.top + 8,
+            borderBottomColor: colors.headerBorder,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => nav.goBack()}>
           <Text style={styles.backBtn}>←</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Draw Field Border</Text>
+        <Text style={styles.headerTitle}>{isEditMode ? "Update Field" : "Draw Field Border"}</Text>
         <View style={styles.headerSpacer} />
       </View>
 
-      <MapView
-        provider={PROVIDER_GOOGLE}
-        style={styles.map}
-        initialRegion={INITIAL_REGION}
-        onPress={addPoint}
-      >
-        {points.map((point, index) => (
-          <Marker
-            key={`${point.latitude}-${point.longitude}-${index.toString()}`}
-            coordinate={point}
-            title={`Point ${index + 1}`}
-          />
-        ))}
-        {points.length >= 3 ? (
-          <Polygon
-            coordinates={points}
-            strokeColor="#2E7D32"
-            fillColor="rgba(46, 125, 50, 0.2)"
-            strokeWidth={2}
-          />
-        ) : null}
-      </MapView>
+      <View style={styles.mapWrap}>
+        <MapView
+          ref={mapRef}
+          provider={PROVIDER_GOOGLE}
+          style={styles.map}
+          initialRegion={INITIAL_REGION}
+          region={region}
+          onRegionChangeComplete={setRegion}
+          onTouchStart={onMapTouchStart}
+          onTouchMove={onMapTouchMove}
+          onTouchEnd={onMapTouchEnd}
+          customMapStyle={mapType === "standard" ? mapStyle : undefined}
+          mapType={mapType}
+          showsCompass
+          showsScale
+          toolbarEnabled={false}
+          showsUserLocation={Boolean(locationPermissionGranted)}
+          showsMyLocationButton={false}
+        >
+          {lockedFields.map((field) => (
+            <Polygon
+              key={field.id}
+              coordinates={field.points}
+              strokeColor="#1B5E20"
+              fillColor="rgba(46, 125, 50, 0.18)"
+              strokeWidth={2}
+            />
+          ))}
+
+          {drawingLine.length > 1 ? (
+            <Polyline coordinates={drawingLine} strokeColor="#D45A2A" strokeWidth={3} />
+          ) : null}
+
+          {points.length >= 3 ? (
+            <Polygon
+              coordinates={points}
+              strokeColor="#D45A2A"
+              fillColor="rgba(212, 90, 42, 0.24)"
+              strokeWidth={3}
+            />
+          ) : null}
+
+          {points.map((point, index) => (
+            <Marker
+              key={`${point.latitude}-${point.longitude}-${index.toString()}`}
+              coordinate={point}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.pointMarker}>
+                <Text style={styles.pointMarkerText}>{index + 1}</Text>
+              </View>
+            </Marker>
+          ))}
+        </MapView>
+
+        <View pointerEvents="none" style={[styles.areaBadge, { top: insets.top + 16 }]}>
+          <Text style={styles.areaBadgeLabel}>Total area</Text>
+          <Text style={styles.areaBadgeValue}>{areaHa.toFixed(2)} ha</Text>
+        </View>
+
+        <View pointerEvents="box-none" style={[styles.mapControls, { top: insets.top + 16 }]}>
+          <Pressable
+            style={[styles.mapControlBtn, mapType === "hybrid" && styles.mapControlBtnActive]}
+            onPress={() => setMapType((current) => (current === "hybrid" ? "standard" : "hybrid"))}
+            accessibilityLabel="Change map view"
+          >
+            <Text style={[styles.mapControlText, mapType === "hybrid" && styles.mapControlTextActive]}>
+              {mapType === "hybrid" ? "Sat" : "Map"}
+            </Text>
+          </Pressable>
+
+          <Pressable style={styles.mapControlBtn} onPress={handleUseCurrentLocation}>
+            <Text style={styles.mapControlText}>◎</Text>
+          </Pressable>
+
+          <Pressable style={styles.mapControlBtn} onPress={() => zoomByFactor(0.5)} accessibilityLabel="Zoom in">
+            <Text style={styles.mapControlText}>＋</Text>
+          </Pressable>
+
+          <Pressable style={styles.mapControlBtn} onPress={() => zoomByFactor(2.0)} accessibilityLabel="Zoom out">
+            <Text style={styles.mapControlText}>－</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.mapControlBtn, points.length === 0 && styles.disabledControl]}
+            onPress={undoPoint}
+            disabled={points.length === 0}
+            accessibilityLabel="Undo last border point"
+          >
+            <Text style={styles.mapControlText}>↶</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.mapControlBtn, points.length === 0 && styles.disabledControl]}
+            onPress={clearPoints}
+            disabled={points.length === 0}
+            accessibilityLabel="Clear border points"
+          >
+            <Text style={styles.mapControlText}>×</Text>
+          </Pressable>
+        </View>
+      </View>
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
         <Text style={styles.helpText}>
-          Tap on the map to add boundary points in order, like Farmable polygon drawing.
+          Tap once to place a border point. Press and drag the map to move around without adding points.
         </Text>
+
+        {lockedFieldsError ? <Text style={styles.warningText}>{lockedFieldsError}</Text> : null}
 
         <View style={styles.statsRow}>
           <Text style={styles.stat}>Points: {points.length}</Text>
           <Text style={styles.stat}>Area: {areaHa.toFixed(2)} ha</Text>
+          <Text style={styles.stat}>Saved: {savedAreaHa.toFixed(2)} ha</Text>
         </View>
 
-        <View style={styles.actionsRow}>
-          <Pressable style={styles.actionBtn} onPress={undoPoint} disabled={points.length === 0}>
-            <Text style={styles.actionBtnText}>Undo</Text>
-          </Pressable>
-          <Pressable style={styles.actionBtn} onPress={clearPoints} disabled={points.length === 0}>
-            <Text style={styles.actionBtnText}>Clear</Text>
-          </Pressable>
-        </View>
+        {centroid ? (
+          <View style={styles.statsRow}>
+            <Text style={styles.stat}>
+              Centroid: {centroid.latitude.toFixed(4)}, {centroid.longitude.toFixed(4)}
+            </Text>
+          </View>
+        ) : null}
+
+        <Text style={styles.sectionTitle}>Field Profile</Text>
 
         <TextInput
           value={fieldName}
@@ -162,24 +907,182 @@ export function FieldBoundarySetupScreen() {
           style={styles.input}
           placeholderTextColor="#777"
         />
+
+        <Pressable style={styles.selector} onPress={() => setCropModalVisible(true)}>
+          <Text style={cropType ? styles.selectorValue : styles.selectorPlaceholder}>
+            {SUPPORTED_CROPS.find((item) => item.value === cropType)?.label || cropType || "Select crop"}
+          </Text>
+          <Text style={styles.selectorChevron}>▾</Text>
+        </Pressable>
+
+        <Pressable style={styles.selector} onPress={openDatePicker}>
+          <Text style={plantingDate ? styles.selectorValue : styles.selectorPlaceholder}>
+            {formatDateForDisplay(plantingDate)}
+          </Text>
+          <Text style={styles.selectorChevron}>📅</Text>
+        </Pressable>
+
         <TextInput
-          value={cropType}
-          onChangeText={setCropType}
-          placeholder="Crop type (optional)"
+          value={governorate}
+          onChangeText={(value) => setGovernorate(normalizeGovernorateName(value))}
+          placeholder={isResolvingGovernorate ? "Detecting governorate..." : "Governorate"}
           style={styles.input}
           placeholderTextColor="#777"
         />
 
-        <Pressable style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]} onPress={onSave} disabled={isSaving}>
-          <Text style={styles.saveBtnText}>{isSaving ? "Saving..." : "Save Field Boundary"}</Text>
+        <View style={styles.switchRow}>
+          <Text style={styles.switchLabel}>Irrigated</Text>
+          <Switch
+            value={irrigated}
+            onValueChange={setIrrigated}
+            trackColor={{ false: "#CCC", true: "#A5D6A7" }}
+            thumbColor={irrigated ? "#2E7D32" : "#FFF"}
+          />
+        </View>
+
+        {irrigated ? (
+          <Pressable style={styles.selector} onPress={() => setIrrigationModalVisible(true)}>
+            <Text style={irrigationMethod ? styles.selectorValue : styles.selectorPlaceholder}>
+              {irrigationMethod || "Select irrigation method"}
+            </Text>
+            <Text style={styles.selectorChevron}>▾</Text>
+          </Pressable>
+        ) : null}
+
+        <TextInput
+          value={fieldNotes}
+          onChangeText={setFieldNotes}
+          placeholder="Field notes (optional)"
+          style={[styles.input, styles.notesInput]}
+          placeholderTextColor="#777"
+          multiline
+        />
+
+        <Pressable
+          style={[styles.saveBtn, (isSaving || isLoadingEditField) && styles.saveBtnDisabled]}
+          onPress={onSave}
+          disabled={isSaving || isLoadingEditField}
+        >
+          <Text style={styles.saveBtnText}>
+            {isSaving
+              ? isEditMode
+                ? "Updating..."
+                : "Saving..."
+              : isEditMode
+                ? "Update Field"
+                : "Save Field Boundary"}
+          </Text>
         </Pressable>
       </ScrollView>
+
+      <PickerModal
+        visible={cropModalVisible}
+        title="Select Crop"
+        options={SUPPORTED_CROPS}
+        searchable
+        onClose={() => setCropModalVisible(false)}
+        onSelect={(value) => setCropType(value)}
+      />
+
+      <PickerModal
+        visible={irrigationModalVisible}
+        title="Select Irrigation Method"
+        options={IRRIGATION_METHODS}
+        onClose={() => setIrrigationModalVisible(false)}
+        onSelect={(value) => setIrrigationMethod(value)}
+      />
+
+      <Modal visible={showDatePicker} transparent animationType="slide" onRequestClose={() => setShowDatePicker(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.calendarCard}>
+            <View style={styles.calendarHeader}>
+              <Pressable style={styles.calendarNavBtn} onPress={() => shiftCalendarMonth(-1)}>
+                <Text style={styles.calendarNavText}>{"<"}</Text>
+              </Pressable>
+
+              <Text style={styles.calendarTitle}>{formatMonthTitle(calendarMonth)}</Text>
+
+              <Pressable
+                style={[
+                  styles.calendarNavBtn,
+                  isSameOrAfterCurrentMonth(calendarMonth) && styles.calendarNavBtnDisabled,
+                ]}
+                onPress={() => shiftCalendarMonth(1)}
+                disabled={isSameOrAfterCurrentMonth(calendarMonth)}
+              >
+                <Text style={styles.calendarNavText}>{">"}</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.weekdayRow}>
+              {WEEKDAY_LABELS.map((day) => (
+                <Text key={day} style={styles.weekdayText}>
+                  {day}
+                </Text>
+              ))}
+            </View>
+
+            <View style={styles.calendarGrid}>
+              {calendarDays.map((date, index) => {
+                const selected = date ? sameDate(plantingDate, date) : false;
+                const today = date ? sameDate(new Date(), date) : false;
+                const disabled = !date || isAfterToday(date);
+
+                return (
+                  <Pressable
+                    key={date ? date.toISOString() : `empty-${index.toString()}`}
+                    style={[
+                      styles.calendarDay,
+                      selected && styles.calendarDaySelected,
+                      today && !selected && styles.calendarDayToday,
+                      disabled && styles.calendarDayDisabled,
+                    ]}
+                    disabled={disabled}
+                    onPress={() => date && !disabled && selectPlantingDate(date)}
+                  >
+                    <Text
+                      style={[
+                        styles.calendarDayText,
+                        selected && styles.calendarDayTextSelected,
+                        disabled && styles.calendarDayTextDisabled,
+                      ]}
+                    >
+                      {date ? date.getDate() : ""}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <View style={styles.calendarActions}>
+              <Pressable style={styles.calendarActionBtn} onPress={() => setShowDatePicker(false)}>
+                <Text style={styles.calendarActionText}>Cancel</Text>
+              </Pressable>
+
+              <Pressable style={styles.calendarActionBtn} onPress={() => selectPlantingDate(new Date())}>
+                <Text style={styles.calendarActionText}>Today</Text>
+              </Pressable>
+
+              <Pressable
+                style={styles.calendarActionBtn}
+                onPress={() => {
+                  setPlantingDate(null);
+                  setShowDatePicker(false);
+                }}
+              >
+                <Text style={styles.calendarActionText}>Clear</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -188,17 +1091,128 @@ const styles = StyleSheet.create({
     paddingBottom: 12,
     borderBottomWidth: 1,
     backgroundColor: "#FAFAF8",
+    zIndex: 20,
   },
   backBtn: { fontSize: 24, color: "#222" },
   headerTitle: { fontSize: 18, fontWeight: "700", color: "#2C2C2C" },
   headerSpacer: { width: 18 },
-  map: { flex: 1, minHeight: 320 },
-  panel: { maxHeight: 320, backgroundColor: "#FAFAF8" },
-  panelContent: { padding: 16, paddingBottom: 28 },
-  helpText: { color: "#4A4A4A", marginBottom: 12 },
-  statsRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
-  stat: { fontSize: 14, fontWeight: "600", color: "#1E1E1E" },
-  actionsRow: { flexDirection: "row", gap: 8, marginBottom: 12 },
+
+  mapWrap: {
+    position: "relative",
+    flex: 1,
+    minHeight: 320,
+  },
+  map: {
+    width: "100%",
+    height: "100%",
+    minHeight: 320,
+  },
+
+  mapControls: {
+    position: "absolute",
+    right: 14,
+    gap: 10,
+  },
+  mapControlBtn: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#FFF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#DDD",
+    elevation: 3,
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+  },
+  mapControlBtnActive: {
+    backgroundColor: "#D45A2A",
+    borderColor: "#D45A2A",
+  },
+  mapControlText: {
+    fontSize: 18,
+    color: "#2C2C2C",
+    fontWeight: "700",
+  },
+  mapControlTextActive: {
+    color: "#FFF",
+  },
+  disabledControl: {
+    opacity: 0.45,
+  },
+  areaBadge: {
+    position: "absolute",
+    left: 14,
+    backgroundColor: "rgba(20, 20, 20, 0.72)",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  areaBadgeLabel: {
+    color: "#EDEDED",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  areaBadgeValue: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  pointMarker: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#D45A2A",
+    borderWidth: 2,
+    borderColor: "#1B1B1B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pointMarkerText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  panel: {
+    maxHeight: 460,
+    backgroundColor: "#FAFAF8",
+  },
+  panelContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+
+  helpText: {
+    color: "#4A4A4A",
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  warningText: {
+    color: "#B45309",
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  stat: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1E1E1E",
+  },
+
+  actionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
   actionBtn: {
     flex: 1,
     paddingVertical: 10,
@@ -208,19 +1222,75 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "#FFF",
   },
-  actionBtnText: { color: "#333", fontWeight: "600" },
+  actionBtnText: {
+    color: "#333",
+    fontWeight: "600",
+  },
+
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#2C2C2C",
+    marginBottom: 12,
+  },
+
   input: {
     backgroundColor: "#FFF",
     borderWidth: 1,
     borderColor: "#D5D5D5",
     borderRadius: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     marginBottom: 10,
     color: "#222",
   },
+
+  selector: {
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#D5D5D5",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    marginBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  selectorValue: {
+    color: "#222",
+    fontSize: 14,
+  },
+  selectorPlaceholder: {
+    color: "#777",
+    fontSize: 14,
+  },
+  selectorChevron: {
+    fontSize: 14,
+    color: "#666",
+  },
+
+  notesInput: {
+    minHeight: 90,
+    textAlignVertical: "top",
+    paddingTop: 12,
+  },
+
+  switchRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingVertical: 6,
+  },
+  switchLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#1E1E1E",
+  },
+
   saveBtn: {
-    marginTop: 4,
+    marginTop: 8,
     backgroundColor: "#2E7D32",
     paddingVertical: 12,
     borderRadius: 8,
@@ -228,4 +1298,159 @@ const styles = StyleSheet.create({
   },
   saveBtnDisabled: { opacity: 0.7 },
   saveBtnText: { color: "#FFF", fontSize: 15, fontWeight: "700" },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.35)",
+    justifyContent: "flex-end",
+  },
+  modalCard: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    maxHeight: "75%",
+    paddingBottom: 16,
+  },
+  modalHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    color: "#222",
+  },
+  modalClose: {
+    fontSize: 20,
+    color: "#666",
+  },
+  modalSearchInput: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#DDD",
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    color: "#222",
+  },
+  modalList: {
+    paddingHorizontal: 16,
+  },
+  modalOption: {
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  modalOptionText: {
+    fontSize: 15,
+    color: "#222",
+  },
+  modalEmpty: {
+    fontSize: 14,
+    color: "#777",
+    paddingVertical: 14,
+  },
+  calendarCard: {
+    backgroundColor: "#FFF",
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 18,
+  },
+  calendarHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  calendarTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#222",
+  },
+  calendarNavBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#F3F5F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  calendarNavText: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#2E7D32",
+  },
+  calendarNavBtnDisabled: {
+    opacity: 0.35,
+  },
+  weekdayRow: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+  weekdayText: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#666",
+  },
+  calendarGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+  },
+  calendarDay: {
+    width: "14.2857%",
+    aspectRatio: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+    marginVertical: 2,
+  },
+  calendarDayToday: {
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+  },
+  calendarDaySelected: {
+    backgroundColor: "#2E7D32",
+  },
+  calendarDayDisabled: {
+    opacity: 0.35,
+  },
+  calendarDayText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#222",
+  },
+  calendarDayTextSelected: {
+    color: "#FFF",
+  },
+  calendarDayTextDisabled: {
+    color: "#999",
+  },
+  calendarActions: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 14,
+  },
+  calendarActionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "#D5D5D5",
+    borderRadius: 10,
+    paddingVertical: 11,
+    alignItems: "center",
+  },
+  calendarActionText: {
+    color: "#2E7D32",
+    fontWeight: "800",
+  },
 });
