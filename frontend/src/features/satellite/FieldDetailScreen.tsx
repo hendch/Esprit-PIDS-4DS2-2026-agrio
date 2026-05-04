@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,7 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Routes } from "../../core/navigation/routes";
 import { useTheme } from "../../core/theme/useTheme";
 import { httpClient } from "../../core/api/httpClient";
-import { FieldBoundaryRecord, getFieldBoundary } from "./fieldBoundaryService";
+import { FieldBoundaryRecord, deleteFieldBoundary, getFieldBoundary } from "./fieldBoundaryService";
 import {
   FertilizerRecommendation,
   getFertilizerRecommendation,
@@ -298,6 +299,7 @@ export function FieldDetailScreen() {
   const [isLoadingNdvi, setIsLoadingNdvi] = useState(false);
   const [isLoadingOptimize, setIsLoadingOptimize] = useState(false);
   const [isLoadingFertilizer, setIsLoadingFertilizer] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
@@ -414,6 +416,43 @@ export function FieldDetailScreen() {
     return buildRecommendation(field, optimize, weather, ndvi, effectiveNdviMean);
   }, [field, optimize, weather, ndvi, effectiveNdviMean]);
 
+  const onUpdateField = () => {
+    if (!fieldId) {
+      return;
+    }
+    nav.navigate(Routes.FieldBoundarySetup, { fieldId });
+  };
+
+  const onDeleteField = () => {
+    if (!fieldId || !field) {
+      return;
+    }
+
+    Alert.alert(
+      "Delete field",
+      `Delete ${field.name}? This removes the saved boundary and field profile.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              setIsDeleting(true);
+              await deleteFieldBoundary(fieldId);
+              nav.goBack();
+            } catch (error) {
+              console.error("Delete field failed:", error);
+              Alert.alert("Delete failed", "Could not delete this field. Please try again.");
+            } finally {
+              setIsDeleting(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}> 
       <View
@@ -473,6 +512,22 @@ export function FieldDetailScreen() {
                   </Text>
                 </View>
               </View>
+            </View>
+
+            <View style={styles.fieldActionsRow}>
+              <Pressable style={styles.updateFieldBtn} onPress={onUpdateField}>
+                <Text style={styles.updateFieldBtnText}>Update Field</Text>
+              </Pressable>
+
+              <Pressable
+                style={[styles.deleteFieldBtn, isDeleting && styles.actionBtnDisabled]}
+                onPress={onDeleteField}
+                disabled={isDeleting}
+              >
+                <Text style={styles.deleteFieldBtnText}>
+                  {isDeleting ? "Deleting..." : "Delete Field"}
+                </Text>
+              </Pressable>
             </View>
 
             <View style={styles.card}>
@@ -852,6 +907,41 @@ const styles = StyleSheet.create({
     color: "#2C2C2C",
     fontWeight: "700",
     fontSize: 13,
+  },
+  fieldActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginHorizontal: 24,
+    marginTop: 14,
+  },
+  updateFieldBtn: {
+    flex: 1,
+    backgroundColor: GREEN,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  updateFieldBtnText: {
+    color: "#FFF",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  deleteFieldBtn: {
+    flex: 1,
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: RED,
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  deleteFieldBtnText: {
+    color: RED,
+    fontWeight: "800",
+    fontSize: 14,
+  },
+  actionBtnDisabled: {
+    opacity: 0.55,
   },
 
   card: {

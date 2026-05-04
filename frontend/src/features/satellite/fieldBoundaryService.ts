@@ -239,4 +239,28 @@ export async function saveFieldBoundary(
 
   return toFieldBoundaryRecord(data);
 }
+
+export async function updateFieldBoundary(
+  fieldId: string,
+  payload: FieldBoundaryPayload,
+): Promise<FieldBoundaryRecord> {
+  const { data } = await httpClient.patch<FieldApiResponse>(`/api/v1/fields/${fieldId}`, {
+    name: payload.name,
+    crop_type: payload.cropType ?? null,
+    area_ha: payload.areaHa ?? null,
+    boundary: toGeoJsonPolygon(payload.points),
+
+    governorate: payload.governorate ?? null,
+    planting_date: payload.plantingDate ?? null,
+    irrigated: payload.irrigated ?? false,
+    irrigation_method: payload.irrigationMethod ?? null,
+    field_notes: payload.fieldNotes ?? null,
+  });
+
+  return toFieldBoundaryRecord(data);
+}
+
+export async function deleteFieldBoundary(fieldId: string): Promise<void> {
+  await httpClient.delete(`/api/v1/fields/${fieldId}`);
+}
 ``
