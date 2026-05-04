@@ -19,21 +19,34 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {column["name"] for column in inspector.get_columns("market_forecasts")}
+    indexes = {index["name"] for index in inspector.get_indexes("market_forecasts")}
+    unique_constraints = {
+        constraint["name"]
+        for constraint in inspector.get_unique_constraints("market_forecasts")
+    }
+
     # Add region column with default so existing rows get 'national'
-    op.add_column(
-        'market_forecasts',
-        sa.Column('region', sa.String(length=32), nullable=False, server_default='national'),
-    )
-    op.create_index('ix_market_forecasts_region', 'market_forecasts', ['region'])
+    if "region" not in columns:
+        op.add_column(
+            'market_forecasts',
+            sa.Column('region', sa.String(length=32), nullable=False, server_default='national'),
+        )
+    if "ix_market_forecasts_region" not in indexes:
+        op.create_index('ix_market_forecasts_region', 'market_forecasts', ['region'])
 
     # Replace old unique constraint (series_name, generated_date)
     # with (series_name, region, generated_date)
-    op.drop_constraint('uq_series_generated_date', 'market_forecasts', type_='unique')
-    op.create_unique_constraint(
-        'uq_series_region_generated_date',
-        'market_forecasts',
-        ['series_name', 'region', 'generated_date'],
-    )
+    if "uq_series_generated_date" in unique_constraints:
+        op.drop_constraint('uq_series_generated_date', 'market_forecasts', type_='unique')
+    if "uq_series_region_generated_date" not in unique_constraints:
+        op.create_unique_constraint(
+            'uq_series_region_generated_date',
+            'market_forecasts',
+            ['series_name', 'region', 'generated_date'],
+        )
 
 
 def downgrade() -> None:

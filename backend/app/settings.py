@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     cdse_client_id: str | None = None
     cdse_client_secret: SecretStr | None = None
 
+    fertilizer_model_path: str = "app/modules/fertilizer/model/fertilizer_recommendation_rf.joblib"
+    fertilizer_feature_schema_path: str = "app/modules/fertilizer/model/features.json"
+
     # Comma-separated; cannot use * when allow_credentials=True. Include Expo web dev server.
     cors_origins: str = Field(
         default=(

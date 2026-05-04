@@ -16,6 +16,10 @@ import { Routes } from "../../core/navigation/routes";
 import { useTheme } from "../../core/theme/useTheme";
 import { httpClient } from "../../core/api/httpClient";
 import { FieldBoundaryRecord, getFieldBoundary } from "./fieldBoundaryService";
+import {
+  FertilizerRecommendation,
+  getFertilizerRecommendation,
+} from "./fertilizerRecommendationService";
 import { cropValueToLabel } from "./fieldVocabulary";
 
 const OFFSET_WHITE = "#FAFAF8";
@@ -287,16 +291,19 @@ export function FieldDetailScreen() {
   const [weather, setWeather] = useState<FieldWeatherContextResponse | null>(null);
   const [ndvi, setNdvi] = useState<FieldNdviResponse | null>(null);
   const [optimize, setOptimize] = useState<FieldOptimizeResponse | null>(null);
+  const [fertilizer, setFertilizer] = useState<FertilizerRecommendation | null>(null);
 
   const [isLoadingField, setIsLoadingField] = useState(true);
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [isLoadingNdvi, setIsLoadingNdvi] = useState(false);
   const [isLoadingOptimize, setIsLoadingOptimize] = useState(false);
+  const [isLoadingFertilizer, setIsLoadingFertilizer] = useState(false);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [ndviError, setNdviError] = useState<string | null>(null);
   const [optimizeError, setOptimizeError] = useState<string | null>(null);
+  const [fertilizerError, setFertilizerError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -364,6 +371,20 @@ export function FieldDetailScreen() {
           })
           .finally(() => {
             if (isMounted) setIsLoadingNdvi(false);
+          });
+
+        setIsLoadingFertilizer(true);
+        setFertilizerError(null);
+        getFertilizerRecommendation(fieldId)
+          .then((data) => {
+            if (isMounted) setFertilizer(data);
+          })
+          .catch((error) => {
+            console.error("Fertilizer recommendation failed:", error);
+            if (isMounted) setFertilizerError("Fertilizer recommendation unavailable.");
+          })
+          .finally(() => {
+            if (isMounted) setIsLoadingFertilizer(false);
           });
       } catch (error) {
         console.error("Load field failed:", error);
@@ -628,6 +649,43 @@ export function FieldDetailScreen() {
               )}
 
               {ndviError ? <Text style={styles.inlineErrorText}>{ndviError}</Text> : null}
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Fertilizer Recommendation</Text>
+
+              {isLoadingFertilizer ? (
+                <Text style={styles.inlineStateText}>Checking fertilizer...</Text>
+              ) : fertilizer ? (
+                <>
+                  <Text style={styles.primaryMetric}>{fertilizer.formula}</Text>
+                  <Text style={styles.secondaryMetric}>
+                    {fertilizer.fertilizer_kg_per_ha.toFixed(1)} kg/ha
+                  </Text>
+                  <Text style={styles.secondaryMetric}>
+                    Total for field: {fertilizer.total_fertilizer_kg.toFixed(1)} kg
+                  </Text>
+
+                  <View style={styles.contextBlock}>
+                    <Text style={styles.contextTitle}>Nutrient Need</Text>
+                    <Text style={styles.contextLine}>
+                      N: {fertilizer.nutrient_need_kg_ha.N?.toFixed(1) ?? "—"} kg/ha
+                    </Text>
+                    <Text style={styles.contextLine}>
+                      P: {fertilizer.nutrient_need_kg_ha.P?.toFixed(1) ?? "—"} kg/ha
+                    </Text>
+                    <Text style={styles.contextLine}>
+                      K: {fertilizer.nutrient_need_kg_ha.K?.toFixed(1) ?? "—"} kg/ha
+                    </Text>
+                  </View>
+
+                  <Text style={styles.priorityExplanation}>{fertilizer.explanation}</Text>
+                </>
+              ) : (
+                <Text style={styles.inlineStateText}>No fertilizer recommendation available.</Text>
+              )}
+
+              {fertilizerError ? <Text style={styles.inlineErrorText}>{fertilizerError}</Text> : null}
             </View>
 
             <View style={styles.card}>

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
+  GestureResponderEvent,
   Modal,
   Pressable,
   ScrollView,
@@ -12,9 +13,10 @@ import {
   View,
 } from "react-native";
 import MapView, {
-  MapPressEvent,
+  LatLng as MapLatLng,
   Marker,
   Polygon,
+  Polyline,
   PROVIDER_GOOGLE,
   Region,
 } from "react-native-maps";
@@ -26,7 +28,11 @@ import DateTimePicker, {
 import * as Location from "expo-location";
 
 import { useTheme } from "../../core/theme/useTheme";
-import { saveFieldBoundary } from "./fieldBoundaryService";
+import {
+  FieldBoundaryRecord,
+  listFieldBoundaries,
+  saveFieldBoundary,
+} from "./fieldBoundaryService";
 import {
   SUPPORTED_CROPS,
   normalizeCropName,
@@ -41,9 +47,22 @@ type LatLng = {
 const INITIAL_REGION: Region = {
   latitude: 36.8065,
   longitude: 10.1815,
-  latitudeDelta: 0.08,
-  longitudeDelta: 0.08,
+  latitudeDelta: 0.035,
+  longitudeDelta: 0.035,
 };
+
+const mapStyle = [
+  { elementType: "geometry", stylers: [{ color: "#EEF2E6" }] },
+  { elementType: "labels.text.fill", stylers: [{ color: "#394235" }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: "#F8FAF2" }] },
+  { featureType: "administrative", elementType: "geometry.stroke", stylers: [{ color: "#B9C4B0" }] },
+  { featureType: "landscape.natural", elementType: "geometry", stylers: [{ color: "#DDEDD2" }] },
+  { featureType: "poi", stylers: [{ visibility: "off" }] },
+  { featureType: "road", elementType: "geometry", stylers: [{ color: "#FFFFFF" }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#CAD4C0" }] },
+  { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: "#B9DCEB" }] },
+];
 
 const IRRIGATION_METHODS = [
   "Drip",
@@ -52,6 +71,9 @@ const IRRIGATION_METHODS = [
   "Pivot",
   "Rainfed / None",
 ];
+
+const TAP_MAX_DISTANCE_PX = 12;
+const TAP_MAX_DURATION_MS = 260;
 
 function computeAreaHa(points: LatLng[]): number {
   if (points.length < 3) return 0;
@@ -87,6 +109,90 @@ function computeCentroid(points: LatLng[]): LatLng | null {
     points.reduce((sum, point) => sum + point.longitude, 0) / points.length;
 
   return { latitude, longitude };
+}
+
+function isPointInsidePolygon(point: LatLng, polygon: LatLng[]): boolean {
+  if (polygon.length < 3) {
+    return false;
+  }
+
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index, index += 1) {
+    const currentPoint = polygon[index];
+    const previousPoint = polygon[previous];
+    const crossesLatitude =
+      currentPoint.latitude > point.latitude !== previousPoint.latitude > point.latitude;
+
+    if (!crossesLatitude) {
+      continue;
+    }
+
+    const intersectLongitude =
+      ((previousPoint.longitude - currentPoint.longitude) * (point.latitude - currentPoint.latitude)) /
+        (previousPoint.latitude - currentPoint.latitude) +
+      currentPoint.longitude;
+
+    if (point.longitude < intersectLongitude) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+function orientation(a: LatLng, b: LatLng, c: LatLng): number {
+  return (b.longitude - a.longitude) * (c.latitude - a.latitude) - (b.latitude - a.latitude) * (c.longitude - a.longitude);
+}
+
+function isOnSegment(a: LatLng, b: LatLng, c: LatLng): boolean {
+  return (
+    Math.min(a.longitude, b.longitude) <= c.longitude &&
+    c.longitude <= Math.max(a.longitude, b.longitude) &&
+    Math.min(a.latitude, b.latitude) <= c.latitude &&
+    c.latitude <= Math.max(a.latitude, b.latitude)
+  );
+}
+
+function doSegmentsIntersect(a: LatLng, b: LatLng, c: LatLng, d: LatLng): boolean {
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+  const epsilon = 0.000000001;
+
+  if (Math.abs(o1) < epsilon && isOnSegment(a, b, c)) return true;
+  if (Math.abs(o2) < epsilon && isOnSegment(a, b, d)) return true;
+  if (Math.abs(o3) < epsilon && isOnSegment(c, d, a)) return true;
+  if (Math.abs(o4) < epsilon && isOnSegment(c, d, b)) return true;
+
+  return (o1 > 0) !== (o2 > 0) && (o3 > 0) !== (o4 > 0);
+}
+
+function polygonOverlaps(newPolygon: LatLng[], existingPolygon: LatLng[]): boolean {
+  if (newPolygon.length < 3 || existingPolygon.length < 3) {
+    return false;
+  }
+
+  if (newPolygon.some((point) => isPointInsidePolygon(point, existingPolygon))) {
+    return true;
+  }
+  if (existingPolygon.some((point) => isPointInsidePolygon(point, newPolygon))) {
+    return true;
+  }
+
+  for (let newIndex = 0; newIndex < newPolygon.length; newIndex += 1) {
+    const newStart = newPolygon[newIndex];
+    const newEnd = newPolygon[(newIndex + 1) % newPolygon.length];
+    for (let existingIndex = 0; existingIndex < existingPolygon.length; existingIndex += 1) {
+      const existingStart = existingPolygon[existingIndex];
+      const existingEnd = existingPolygon[(existingIndex + 1) % existingPolygon.length];
+      if (doSegmentsIntersect(newStart, newEnd, existingStart, existingEnd)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function formatDateForApi(date: Date | null): string | undefined {
@@ -202,6 +308,7 @@ export function FieldBoundarySetupScreen() {
   const { colors } = useTheme();
 
   const mapRef = useRef<MapView | null>(null);
+  const tapGestureRef = useRef<{ x: number; y: number; startedAt: number; moved: boolean } | null>(null);
 
   const [region, setRegion] = useState<Region>(INITIAL_REGION);
 
@@ -217,13 +324,21 @@ export function FieldBoundarySetupScreen() {
   const [cropModalVisible, setCropModalVisible] = useState(false);
   const [irrigationModalVisible, setIrrigationModalVisible] = useState(false);
 
+  const [mapType, setMapType] = useState<"standard" | "hybrid">("hybrid");
   const [points, setPoints] = useState<LatLng[]>([]);
+  const [lockedFields, setLockedFields] = useState<FieldBoundaryRecord[]>([]);
+  const [lockedFieldsError, setLockedFieldsError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isResolvingGovernorate, setIsResolvingGovernorate] = useState(false);
   const [locationPermissionGranted, setLocationPermissionGranted] = useState<boolean | null>(null);
 
   const areaHa = useMemo(() => computeAreaHa(points), [points]);
   const centroid = useMemo(() => computeCentroid(points), [points]);
+  const savedAreaHa = useMemo(
+    () => lockedFields.reduce((sum, field) => sum + (field.areaHa ?? computeAreaHa(field.points)), 0),
+    [lockedFields],
+  );
+  const drawingLine = points.length > 1 ? points : [];
 
   useEffect(() => {
     (async () => {
@@ -235,6 +350,30 @@ export function FieldBoundarySetupScreen() {
         setLocationPermissionGranted(false);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadLockedFields() {
+      try {
+        setLockedFieldsError(null);
+        const fields = await listFieldBoundaries();
+        if (isMounted) {
+          setLockedFields(fields.filter((field) => field.points.length >= 3));
+        }
+      } catch {
+        if (isMounted) {
+          setLockedFieldsError("Saved fields could not be loaded. Existing field areas are not available on the map.");
+        }
+      }
+    }
+
+    void loadLockedFields();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -278,9 +417,61 @@ export function FieldBoundarySetupScreen() {
     };
   }, [centroid, points.length, governorate]);
 
-  const addPoint = (event: MapPressEvent) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    setPoints((current) => [...current, { latitude, longitude }]);
+  const addCoordinate = (coordinate: LatLng) => {
+    const { latitude, longitude } = coordinate;
+    const nextPoint = { latitude, longitude };
+    const touchedLockedField = lockedFields.find((field) => isPointInsidePolygon(nextPoint, field.points));
+    if (touchedLockedField) {
+      Alert.alert(
+        "Field already saved",
+        `${touchedLockedField.name} is locked on the map. Delete that field before drawing in this area again.`,
+      );
+      return;
+    }
+
+    setPoints((current) => [...current, nextPoint]);
+  };
+
+  const onMapTouchStart = (event: GestureResponderEvent) => {
+    tapGestureRef.current = {
+      x: event.nativeEvent.locationX,
+      y: event.nativeEvent.locationY,
+      startedAt: Date.now(),
+      moved: false,
+    };
+  };
+
+  const onMapTouchMove = (event: GestureResponderEvent) => {
+    const gesture = tapGestureRef.current;
+    if (!gesture) {
+      return;
+    }
+
+    const deltaX = event.nativeEvent.locationX - gesture.x;
+    const deltaY = event.nativeEvent.locationY - gesture.y;
+    if (Math.hypot(deltaX, deltaY) > TAP_MAX_DISTANCE_PX) {
+      gesture.moved = true;
+    }
+  };
+
+  const onMapTouchEnd = async (event: GestureResponderEvent) => {
+    const gesture = tapGestureRef.current;
+    tapGestureRef.current = null;
+    if (!gesture || gesture.moved || Date.now() - gesture.startedAt > TAP_MAX_DURATION_MS) {
+      return;
+    }
+
+    try {
+      const coordinate = await mapRef.current?.coordinateForPoint({
+        x: event.nativeEvent.locationX,
+        y: event.nativeEvent.locationY,
+      });
+      if (coordinate) {
+        addCoordinate(coordinate);
+      }
+    } catch {
+      Alert.alert("Map tap failed", "Could not read this map position. Try tapping again after the map finishes moving.");
+    }
   };
 
   const undoPoint = () => {
@@ -380,6 +571,15 @@ export function FieldBoundarySetupScreen() {
       return;
     }
 
+    const overlappingField = lockedFields.find((field) => polygonOverlaps(points, field.points));
+    if (overlappingField) {
+      Alert.alert(
+        "Boundary overlaps a saved field",
+        `${overlappingField.name} is already saved. Delete it before reusing that area.`,
+      );
+      return;
+    }
+
     try {
       setIsSaving(true);
 
@@ -434,52 +634,112 @@ export function FieldBoundarySetupScreen() {
           initialRegion={INITIAL_REGION}
           region={region}
           onRegionChangeComplete={setRegion}
-          onPress={addPoint}
+          onTouchStart={onMapTouchStart}
+          onTouchMove={onMapTouchMove}
+          onTouchEnd={onMapTouchEnd}
+          customMapStyle={mapType === "standard" ? mapStyle : undefined}
+          mapType={mapType}
+          showsCompass
+          showsScale
+          toolbarEnabled={false}
           showsUserLocation={Boolean(locationPermissionGranted)}
           showsMyLocationButton={false}
         >
-          {points.map((point, index) => (
-            <Marker
-              key={`${point.latitude}-${point.longitude}-${index}`}
-              coordinate={point}
-              title={`Point ${index + 1}`}
+          {lockedFields.map((field) => (
+            <Polygon
+              key={field.id}
+              coordinates={field.points}
+              strokeColor="#1B5E20"
+              fillColor="rgba(46, 125, 50, 0.18)"
+              strokeWidth={2}
             />
           ))}
+
+          {drawingLine.length > 1 ? (
+            <Polyline coordinates={drawingLine} strokeColor="#D45A2A" strokeWidth={3} />
+          ) : null}
 
           {points.length >= 3 ? (
             <Polygon
               coordinates={points}
-              strokeColor="#2E7D32"
-              fillColor="rgba(46, 125, 50, 0.2)"
-              strokeWidth={2}
+              strokeColor="#D45A2A"
+              fillColor="rgba(212, 90, 42, 0.24)"
+              strokeWidth={3}
             />
           ) : null}
+
+          {points.map((point, index) => (
+            <Marker
+              key={`${point.latitude}-${point.longitude}-${index.toString()}`}
+              coordinate={point}
+              anchor={{ x: 0.5, y: 0.5 }}
+            >
+              <View style={styles.pointMarker}>
+                <Text style={styles.pointMarkerText}>{index + 1}</Text>
+              </View>
+            </Marker>
+          ))}
         </MapView>
 
-        <View style={styles.mapControls}>
-          <TouchableOpacity style={styles.mapControlBtn} onPress={handleUseCurrentLocation}>
+        <View pointerEvents="none" style={[styles.areaBadge, { top: insets.top + 16 }]}>
+          <Text style={styles.areaBadgeLabel}>Total area</Text>
+          <Text style={styles.areaBadgeValue}>{areaHa.toFixed(2)} ha</Text>
+        </View>
+
+        <View pointerEvents="box-none" style={[styles.mapControls, { top: insets.top + 16 }]}>
+          <Pressable
+            style={[styles.mapControlBtn, mapType === "hybrid" && styles.mapControlBtnActive]}
+            onPress={() => setMapType((current) => (current === "hybrid" ? "standard" : "hybrid"))}
+            accessibilityLabel="Change map view"
+          >
+            <Text style={[styles.mapControlText, mapType === "hybrid" && styles.mapControlTextActive]}>
+              {mapType === "hybrid" ? "Sat" : "Map"}
+            </Text>
+          </Pressable>
+
+          <Pressable style={styles.mapControlBtn} onPress={handleUseCurrentLocation}>
             <Text style={styles.mapControlText}>◎</Text>
-          </TouchableOpacity>
+          </Pressable>
 
-          <TouchableOpacity style={styles.mapControlBtn} onPress={() => zoomByFactor(0.5)}>
+          <Pressable style={styles.mapControlBtn} onPress={() => zoomByFactor(0.5)} accessibilityLabel="Zoom in">
             <Text style={styles.mapControlText}>＋</Text>
-          </TouchableOpacity>
+          </Pressable>
 
-          <TouchableOpacity style={styles.mapControlBtn} onPress={() => zoomByFactor(2.0)}>
+          <Pressable style={styles.mapControlBtn} onPress={() => zoomByFactor(2.0)} accessibilityLabel="Zoom out">
             <Text style={styles.mapControlText}>－</Text>
-          </TouchableOpacity>
+          </Pressable>
+
+          <Pressable
+            style={[styles.mapControlBtn, points.length === 0 && styles.disabledControl]}
+            onPress={undoPoint}
+            disabled={points.length === 0}
+            accessibilityLabel="Undo last border point"
+          >
+            <Text style={styles.mapControlText}>↶</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.mapControlBtn, points.length === 0 && styles.disabledControl]}
+            onPress={clearPoints}
+            disabled={points.length === 0}
+            accessibilityLabel="Clear border points"
+          >
+            <Text style={styles.mapControlText}>×</Text>
+          </Pressable>
         </View>
       </View>
 
       <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
         <Text style={styles.helpText}>
-          Use the current location button or move the map manually. Then tap the map to add
-          boundary points in order and define the field polygon.
+          Tap once to place a border point. Press and drag the map to move around without adding points.
         </Text>
+
+        {lockedFieldsError ? <Text style={styles.warningText}>{lockedFieldsError}</Text> : null}
 
         <View style={styles.statsRow}>
           <Text style={styles.stat}>Points: {points.length}</Text>
           <Text style={styles.stat}>Area: {areaHa.toFixed(2)} ha</Text>
+          <Text style={styles.stat}>Saved: {savedAreaHa.toFixed(2)} ha</Text>
         </View>
 
         {centroid ? (
@@ -489,16 +749,6 @@ export function FieldBoundarySetupScreen() {
             </Text>
           </View>
         ) : null}
-
-        <View style={styles.actionsRow}>
-          <Pressable style={styles.actionBtn} onPress={undoPoint} disabled={points.length === 0}>
-            <Text style={styles.actionBtnText}>Undo</Text>
-          </Pressable>
-
-          <Pressable style={styles.actionBtn} onPress={clearPoints} disabled={points.length === 0}>
-            <Text style={styles.actionBtnText}>Clear</Text>
-          </Pressable>
-        </View>
 
         <Text style={styles.sectionTitle}>Field Profile</Text>
 
@@ -631,12 +881,12 @@ const styles = StyleSheet.create({
   mapControls: {
     position: "absolute",
     right: 14,
-    bottom: 18,
+    gap: 10,
   },
   mapControlBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: "#FFF",
     alignItems: "center",
     justifyContent: "center",
@@ -647,12 +897,55 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.08,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 2 },
-    marginBottom: 10,
+  },
+  mapControlBtnActive: {
+    backgroundColor: "#D45A2A",
+    borderColor: "#D45A2A",
   },
   mapControlText: {
-    fontSize: 22,
+    fontSize: 18,
     color: "#2C2C2C",
     fontWeight: "700",
+  },
+  mapControlTextActive: {
+    color: "#FFF",
+  },
+  disabledControl: {
+    opacity: 0.45,
+  },
+  areaBadge: {
+    position: "absolute",
+    left: 14,
+    backgroundColor: "rgba(20, 20, 20, 0.72)",
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  areaBadgeLabel: {
+    color: "#EDEDED",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  areaBadgeValue: {
+    color: "#FFF",
+    fontSize: 18,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+  pointMarker: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#D45A2A",
+    borderWidth: 2,
+    borderColor: "#1B1B1B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pointMarkerText: {
+    color: "#FFF",
+    fontSize: 12,
+    fontWeight: "800",
   },
 
   panel: {
@@ -668,6 +961,11 @@ const styles = StyleSheet.create({
     color: "#4A4A4A",
     marginBottom: 12,
     lineHeight: 20,
+  },
+  warningText: {
+    color: "#B45309",
+    fontSize: 13,
+    marginBottom: 10,
   },
   statsRow: {
     flexDirection: "row",
