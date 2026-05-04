@@ -9,7 +9,7 @@ const Stack = createNativeStackNavigator();
 export function RootNavigator() {
   const routes = featureRegistry.listRoutes();
   const isAuthenticated = useUserStore((s) => s.isAuthenticated);
-  const allowedRouteNames = isAuthenticated
+  const allowedRouteNames: Set<string> = isAuthenticated
     ? new Set(
         Object.values(Routes).filter(
           (routeName) => routeName !== Routes.Login && routeName !== Routes.SignUp,

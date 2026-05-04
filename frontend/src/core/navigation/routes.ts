@@ -5,6 +5,7 @@ export const Routes = {
   Irrigation: "Irrigation",
   Satellite: "Satellite",
   FieldDetail: "FieldDetail",
+  FieldBoundarySetup: "FieldBoundarySetup",
   DiseaseDetection: "DiseaseDetection",
   Livestock: "Livestock",
   Community: "Community",

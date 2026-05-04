@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -8,73 +8,21 @@ import {
   Pressable,
   useWindowDimensions,
 } from "react-native";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Routes } from "../../core/navigation/routes";
 import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useTheme } from "../../core/theme/useTheme";
+import {
+  FieldDisplayItem,
+  FieldStatus,
+  listFieldBoundaries,
+  toFieldDisplayItem,
+} from "./fieldBoundaryService";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
 const GREEN_LIGHT = "#E8F5E9";
-
-type FieldStatus = "Good" | "Warning" | "Poor";
-
-type FieldItem = {
-  id: string;
-  name: string;
-  crop: string;
-  status: FieldStatus;
-  ndvi: number;
-  soilFertility: "High" | "Medium" | "Low";
-  areaHa: number;
-  healthScore: number;
-  planted: string;
-  estHarvest: string;
-  imageTint: string; // placeholder color
-};
-
-const MOCK_FIELDS: FieldItem[] = [
-  {
-    id: "A1",
-    name: "Field A1",
-    crop: "Corn",
-    status: "Good",
-    ndvi: 0.78,
-    soilFertility: "High",
-    areaHa: 12.4,
-    healthScore: 92,
-    planted: "Mar 15, 2026",
-    estHarvest: "Aug 20, 2026",
-    imageTint: "#81C784",
-  },
-  {
-    id: "A2",
-    name: "Field A2",
-    crop: "Wheat",
-    status: "Warning",
-    ndvi: 0.62,
-    soilFertility: "Medium",
-    areaHa: 9.8,
-    healthScore: 78,
-    planted: "Mar 10, 2026",
-    estHarvest: "Jul 15, 2026",
-    imageTint: "#DCE775",
-  },
-  {
-    id: "B2",
-    name: "Field B2",
-    crop: "Corn",
-    status: "Poor",
-    ndvi: 0.48,
-    soilFertility: "Low",
-    areaHa: 11.6,
-    healthScore: 65,
-    planted: "Mar 18, 2026",
-    estHarvest: "Aug 25, 2026",
-    imageTint: "#A1887F",
-  },
-];
 
 function statusColor(s: FieldStatus): string {
   if (s === "Good") return "#4CAF50";
@@ -115,6 +63,34 @@ export function LandScreen() {
   const { width } = useWindowDimensions();
   const { colors } = useTheme();
   const imageHeight = width * 0.5;
+  const [fields, setFields] = useState<FieldDisplayItem[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadFields = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setLoadError(null);
+      const records = await listFieldBoundaries();
+      setFields(records.map(toFieldDisplayItem));
+    } catch {
+      setLoadError("Could not load your saved fields.");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadFields();
+    }, [loadFields]),
+  );
+
+  const totalArea = fields.reduce((sum, field) => sum + field.areaHa, 0);
+  const avgHealth =
+    fields.length > 0
+      ? fields.reduce((sum, field) => sum + field.healthScore, 0) / fields.length
+      : 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -136,26 +112,32 @@ export function LandScreen() {
       >
         {/* Summary card */}
         <View style={styles.summaryCard}>
+          <TouchableOpacity
+            style={styles.drawBoundaryBtn}
+            onPress={() => nav.navigate(Routes.FieldBoundarySetup)}
+          >
+            <Text style={styles.drawBoundaryBtnText}>Draw Field Borders on Map</Text>
+          </TouchableOpacity>
           <View style={styles.summaryRow}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryIcon}>📐</Text>
               <View>
                 <Text style={styles.summaryLabel}>Total Area</Text>
-                <Text style={styles.summaryValue}>48.0 ha</Text>
+                <Text style={styles.summaryValue}>{totalArea.toFixed(1)} ha</Text>
               </View>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryIcon}>🌱</Text>
               <View>
                 <Text style={styles.summaryLabel}>Active Fields</Text>
-                <Text style={styles.summaryValue}>4</Text>
+                <Text style={styles.summaryValue}>{fields.length}</Text>
               </View>
             </View>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryIcon}>📈</Text>
               <View>
                 <Text style={styles.summaryLabel}>Avg Health</Text>
-                <Text style={styles.summaryValue}>82.5%</Text>
+                <Text style={styles.summaryValue}>{avgHealth.toFixed(1)}%</Text>
               </View>
             </View>
           </View>
@@ -170,7 +152,22 @@ export function LandScreen() {
             </TouchableOpacity>
           </View>
 
-          {MOCK_FIELDS.map((field) => (
+          {isLoading ? <Text style={styles.emptyText}>Loading saved fields...</Text> : null}
+          {!isLoading && loadError ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>{loadError}</Text>
+              <TouchableOpacity style={styles.retryBtn} onPress={loadFields}>
+                <Text style={styles.retryBtnText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {!isLoading && !loadError && fields.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyTitle}>No fields yet</Text>
+              <Text style={styles.emptyText}>Draw a field border to save your first field.</Text>
+            </View>
+          ) : null}
+          {fields.map((field) => (
             <Pressable
               key={field.id}
               style={styles.fieldCard}
@@ -265,6 +262,19 @@ const styles = StyleSheet.create({
     borderColor: "#EEE",
   },
   summaryRow: { flexDirection: "row", justifyContent: "space-between" },
+  drawBoundaryBtn: {
+    backgroundColor: GREEN,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 14,
+    alignItems: "center",
+  },
+  drawBoundaryBtnText: {
+    color: "#FFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
   summaryItem: { flexDirection: "row", alignItems: "center" },
   summaryIcon: { fontSize: 22, marginRight: 10 },
   summaryLabel: { fontSize: 12, color: "#666" },
@@ -273,6 +283,25 @@ const styles = StyleSheet.create({
   sectionTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
   sectionTitle: { fontSize: 18, fontWeight: "700", color: "#2C2C2C" },
   pinIcon: { fontSize: 18 },
+  emptyState: {
+    backgroundColor: "#FFF",
+    borderRadius: 12,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#EEE",
+    marginBottom: 16,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: "700", color: "#2C2C2C", marginBottom: 6 },
+  emptyText: { fontSize: 14, color: "#666", lineHeight: 20 },
+  retryBtn: {
+    marginTop: 12,
+    alignSelf: "flex-start",
+    backgroundColor: GREEN,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  retryBtnText: { color: "#FFF", fontWeight: "700" },
   fieldCard: {
     backgroundColor: "#FFF",
     borderRadius: 16,
