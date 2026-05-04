@@ -28,7 +28,7 @@ class OpenMeteoWeatherProvider:
     def get_today_sync(self, lat: float, lon: float) -> dict[str, Any]:
         """Synchronous single-day fetch used by LangChain tools."""
         url = f"{self._base_url}/v1/forecast"
-        resp = requests.get(url, params=self._daily_params(lat, lon, 7), timeout=10)
+        resp = requests.get(url, params=self._daily_params(lat, lon, 7), timeout=30)
         resp.raise_for_status()
         daily = resp.json().get("daily", {})
         return {
@@ -46,7 +46,7 @@ class OpenMeteoWeatherProvider:
         url = f"{self._base_url}/v1/forecast"
         async with httpx.AsyncClient() as client:
             resp = await client.get(
-                url, params=self._daily_params(lat, lon, days), timeout=10.0
+                url, params=self._daily_params(lat, lon, days), timeout=30.0
             )
             resp.raise_for_status()
             daily = resp.json().get("daily", {})
@@ -73,7 +73,7 @@ class OpenMeteoWeatherProvider:
             "current_weather": True,
         }
         async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
+            resp = await client.get(url, params=params, timeout=30.0)
             resp.raise_for_status()
             cw = resp.json().get("current_weather", {})
 

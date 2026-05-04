@@ -7,9 +7,14 @@ node_modules/
 # Common local files
 *.log
 
-# Backend secrets
+# Environment / secrets
+.env
+.env.example
+backend/.env
+backend/.env.example
 backend/backend.env
-
+frontend/.env
+frontend/.env.example
 # Firebase credentials - never commit these
 google-services.json
 *-firebase-adminsdk-*.json

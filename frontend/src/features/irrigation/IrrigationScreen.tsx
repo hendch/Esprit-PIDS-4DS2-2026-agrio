@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Routes } from "../../core/navigation/routes";
 import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useTheme } from "../../core/theme/useTheme";
-import { irrigationApi, DashboardData } from "./services/irrigationApi";
+import { irrigationApi, DashboardData, Schedule, ScheduleStatus } from "./services/irrigationApi";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
@@ -28,6 +28,39 @@ const INITIAL_ACTIVITY_LOG = [
   { id: "1", color: GREEN, msg: "Irrigation activated", field: "Field A1", vol: "450L", time: "06:00 AM" },
   { id: "2", color: "#FF9800", msg: "Skipped due to rain forecast", field: "Field B2", vol: "0L", time: "02:30 PM" },
 ];
+
+// ─── Status badge config ─────────────────────────────────────────────────────
+const STATUS_CONFIG: Record<ScheduleStatus, { label: string; emoji: string; bg: string; text: string }> = {
+  pending:   { label: "Pending",   emoji: "⏳", bg: "#FFF8E1", text: "#F59E0B" },
+  doing:     { label: "Running",   emoji: "💧", bg: "#E3F2FD", text: "#2196F3" },
+  done:      { label: "Done",      emoji: "✅", bg: "#E8F5E9", text: "#4CAF50" },
+  cancelled: { label: "Cancelled", emoji: "🚫", bg: "#FCE4EC", text: "#E91E63" },
+};
+
+function ScheduleStatusBadge({ status }: { status: ScheduleStatus }) {
+  const cfg = STATUS_CONFIG[status] ?? STATUS_CONFIG.pending;
+  return (
+    <View style={[schedBadgeStyles.badge, { backgroundColor: cfg.bg }]}>
+      <Text style={schedBadgeStyles.emoji}>{cfg.emoji}</Text>
+      <Text style={[schedBadgeStyles.label, { color: cfg.text }]}>{cfg.label}</Text>
+    </View>
+  );
+}
+
+const schedBadgeStyles = StyleSheet.create({
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+    marginTop: 4,
+  },
+  emoji: { fontSize: 11, marginRight: 4 },
+  label: { fontSize: 11, fontWeight: "700" },
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
 function TabBar({ active }: { active: string }) {
   const nav = useNavigation<any>();
@@ -76,7 +109,8 @@ export function IrrigationScreen() {
   const [scheduleTime, setScheduleTime] = useState("");
   const [scheduleDuration, setScheduleDuration] = useState("");
   const [isScheduling, setIsScheduling] = useState(false);
-  const [schedules, setSchedules] = useState<any[]>([]);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboard();
@@ -115,6 +149,32 @@ export function IrrigationScreen() {
     }
   };
 
+  const handleCancelSchedule = (schedule: Schedule) => {
+    Alert.alert(
+      "Cancel Schedule",
+      `Cancel the irrigation scheduled for ${schedule.target_date} at ${schedule.start_time}?`,
+      [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Yes, cancel",
+          style: "destructive",
+          onPress: async () => {
+            setCancellingId(schedule.id);
+            try {
+              await irrigationApi.cancelSchedule(schedule.id);
+              // Remove immediately from local state so it disappears without a round-trip
+              setSchedules((prev) => prev.filter((s) => s.id !== schedule.id));
+            } catch (e) {
+              Alert.alert("Error", "Could not cancel the schedule. It may already be running or completed.");
+            } finally {
+              setCancellingId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const handleCheckIrrigation = async () => {
     setIsLoading(true);
     try {
@@ -131,8 +191,6 @@ export function IrrigationScreen() {
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setActivityLog(prev => [newLog, ...prev]);
-
-      // Refresh dashboard to reflect new possible usage
       loadDashboard();
     } catch (error) {
       console.error(error);
@@ -153,7 +211,6 @@ export function IrrigationScreen() {
     if (/^\d{1,2}$/.test(text)) {
       const day = parseInt(text, 10);
       let target = new Date(now.getFullYear(), now.getMonth(), day);
-      // if passing the 12th when it's the 15th, assume next month
       if (target.getDate() < now.getDate()) target.setMonth(target.getMonth() + 1);
       return target;
     }
@@ -193,7 +250,6 @@ export function IrrigationScreen() {
       return;
     }
 
-    // Convert smartly parsed time like "10:00 AM" back into 24-hr layout for strict JS Date engine
     let tMatch = smartT.match(/(\d+):(\d+)\s*(AM|PM)/i);
     let hh = 8;
     let mmStr = "00";
@@ -206,15 +262,13 @@ export function IrrigationScreen() {
     }
 
     const isoTime = `${hh.toString().padStart(2, '0')}:${mmStr}:00`;
-
-    // Attempt to combine date and time safely.
     const targetDateObj = new Date(`${smartD.toISOString().split('T')[0]}T${isoTime}`);
     if (isNaN(targetDateObj.getTime())) {
       Alert.alert("Validation Error", `Invalid Time format. Try '8' or '08:00 AM'. (Parsed as: ${smartT})`);
       return;
     }
     
-    if (targetDateObj.getTime() < Date.now() - 60000) { // 1 min grace period
+    if (targetDateObj.getTime() < Date.now() - 60000) {
       Alert.alert("Validation Error", "You cannot schedule irrigation in the past!");
       return;
     }
@@ -226,7 +280,7 @@ export function IrrigationScreen() {
         target_date: smartD.toISOString().split('T')[0],
         start_time: smartT,
         duration_minutes: durationNum,
-        water_volume: durationNum * 5 // Mock volume mapping
+        water_volume: durationNum * 5,
       });
       setScheduleModalVisible(false);
       setScheduleDate("");
@@ -378,7 +432,7 @@ export function IrrigationScreen() {
           </View>
         </View>
 
-        {/* Weekly Water Usage -> Today's Usage */}
+        {/* Today's Water Usage */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Today's Water Usage</Text>
           <View style={styles.usageCard}>
@@ -399,20 +453,45 @@ export function IrrigationScreen() {
           </View>
         ))}
 
-        {/* Scheduled Irrigations */}
+        {/* ── Scheduled Irrigations ── */}
         {schedules.length > 0 && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>History & Schedules</Text>
-            {schedules.map((s, idx) => (
-              <View key={idx} style={styles.logCard}>
-                <View style={[styles.logDot, { backgroundColor: '#2196F3' }]} />
-                <View style={styles.logBody}>
-                  <Text style={styles.logMsg}>{s.target_date} at {s.start_time}</Text>
-                  <Text style={styles.logField}>{s.field_id} · {s.duration_minutes} mins · {s.status}</Text>
+            {schedules.map((s) => {
+              const isCancelling = cancellingId === s.id;
+              const canCancel = s.status === "pending";
+
+              return (
+                <View key={s.id} style={styles.scheduleCard}>
+                  {/* Left accent dot coloured by status */}
+                  <View style={[styles.logDot, { backgroundColor: STATUS_CONFIG[s.status]?.text ?? "#999", alignSelf: "flex-start", marginTop: 4 }]} />
+
+                  {/* Info block */}
+                  <View style={styles.logBody}>
+                    <Text style={styles.logMsg}>{s.target_date} at {s.start_time}</Text>
+                    <Text style={styles.logField}>{s.field_id} · {s.duration_minutes} min · {s.water_volume}L</Text>
+                    <ScheduleStatusBadge status={s.status} />
+                  </View>
+
+                  {/* Cancel button — only shown for pending, hidden for others */}
+                  {canCancel && (
+                    <Pressable
+                      onPress={() => handleCancelSchedule(s)}
+                      disabled={isCancelling}
+                      style={({ pressed }) => [
+                        styles.cancelBtn,
+                        (pressed || isCancelling) && styles.cancelBtnPressed,
+                      ]}
+                    >
+                      {isCancelling
+                        ? <ActivityIndicator size="small" color="#E91E63" />
+                        : <Text style={styles.cancelBtnText}>✕</Text>
+                      }
+                    </Pressable>
+                  )}
                 </View>
-                <Text style={styles.logTime}>⏳</Text>
-              </View>
-            ))}
+              );
+            })}
           </View>
         )}
 
@@ -547,11 +626,26 @@ const styles = StyleSheet.create({
   usageCard: { backgroundColor: "#FFF", borderRadius: 16, padding: 20, borderWidth: 1, borderColor: "#EEE" },
   usageValue: { fontSize: 24, fontWeight: "700", color: "#2C2C2C" },
   logCard: { flexDirection: "row", alignItems: "center", backgroundColor: "#FFF", borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#EEE" },
+  // Schedule card — slightly taller to fit badge + cancel button
+  scheduleCard: { flexDirection: "row", alignItems: "flex-start", backgroundColor: "#FFF", borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: "#EEE" },
   logDot: { width: 10, height: 10, borderRadius: 5, marginRight: 12 },
   logBody: { flex: 1 },
   logMsg: { fontSize: 14, fontWeight: "600", color: "#2C2C2C" },
   logField: { fontSize: 12, color: "#666", marginTop: 2 },
   logTime: { fontSize: 12, color: "#666" },
+  // Cancel button
+  cancelBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "#FCE4EC",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: 10,
+    alignSelf: "center",
+  },
+  cancelBtnPressed: { opacity: 0.6 },
+  cancelBtnText: { fontSize: 14, color: "#E91E63", fontWeight: "700" },
   overrideDesc: { fontSize: 14, color: "#555", marginBottom: 16, lineHeight: 22 },
   overrideButtons: { flexDirection: "row", gap: 12 },
   overrideBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", backgroundColor: "#FFF", borderRadius: 12, padding: 14, borderWidth: 1, borderColor: "#EEE" },
@@ -559,10 +653,6 @@ const styles = StyleSheet.create({
   overrideBtnIcon: { fontSize: 18, marginRight: 8 },
   overrideBtnText: { fontSize: 14, fontWeight: "600", color: "#2C2C2C" },
   pressed: { opacity: 0.9 },
-  systemCard: { marginBottom: 24 },
-  systemImage: { borderRadius: 16, overflow: "hidden", position: "relative" },
-  systemBadge: { position: "absolute", bottom: 12, left: 12, backgroundColor: GREEN, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
-  systemBadgeText: { fontSize: 13, fontWeight: "600", color: "#FFF" },
   tabBar: { flexDirection: "row", alignItems: "center", justifyContent: "space-around", paddingTop: 12, paddingHorizontal: 8, backgroundColor: "#FFF", borderTopWidth: 1, borderTopColor: "#EEE" },
   tabItem: { alignItems: "center", flex: 1 },
   tabIconWrap: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", marginBottom: 4 },
@@ -570,8 +660,6 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 20 },
   tabLabel: { fontSize: 10, color: "#666" },
   tabLabelActive: { color: GREEN, fontWeight: "600" },
-  
-  // Modal Styles
   modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", padding: 20 },
   modalContent: { backgroundColor: "#FFF", borderRadius: 16, padding: 24 },
   modalTitle: { fontSize: 20, fontWeight: "700", marginBottom: 20, color: "#2C2C2C" },

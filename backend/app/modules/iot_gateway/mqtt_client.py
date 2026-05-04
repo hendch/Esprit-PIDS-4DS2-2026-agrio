@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import json
 import time
@@ -54,7 +55,6 @@ class MqttSensorProvider:
             self._moisture_history.append({"time": current_time, "value": self._latest_moisture})
             if len(self._moisture_history) > 15:
                 self._moisture_history.pop(0)
-
             logger.info("MQTT moisture reading: %.1f%%", self._latest_moisture)
         except (TypeError, ValueError, UnicodeDecodeError):
             logger.warning("Could not parse MQTT payload: %s", msg.payload)
@@ -112,8 +112,6 @@ class MqttSensorProvider:
         self.connect()
         if self._client is None:
             return self._reading_payload(waited_for_message=False)
-
-        # Wait until the first payload (Wokwi publishes every 3s; allow extra slack for TCP + SUBACK).
         for _ in range(80):
             if self._received_mqtt_payload:
                 break
@@ -160,8 +158,13 @@ class MqttCommandPublisher:
     def publish_command_sync(self, topic: str, message: dict) -> bool:
         self.connect()
         if self._client:
-            self._client.publish(topic, str(message))
+            self._client.loop_start()
+            result = self._client.publish(topic, json.dumps(message))
+            result.wait_for_publish(timeout=5)
+            self._client.loop_stop()
+            logger.info("MQTT command published to %r: %s", topic, message)
             return True
+        logger.warning("MQTT command publisher: not connected, skipping publish")
         return False
 
     async def publish_command(self, device_id: str, command: dict) -> bool:
