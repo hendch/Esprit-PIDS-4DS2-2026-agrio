@@ -49,13 +49,16 @@ async def check_irrigation(data: dict):
     lat = data.get("lat", 36.8)
     lon = data.get("lon", 10.18)
     query = f"Should I irrigate {crop} at {lat},{lon}?"
-    result = _get_agent().run(
-        query=query,
-        crop=crop,
-        growth_stage=growth_stage,
-        lat=float(lat),
-        lon=float(lon),
-    )
+    try:
+        result = _get_agent().run(
+            query=query,
+            crop=crop,
+            growth_stage=growth_stage,
+            lat=float(lat),
+            lon=float(lon),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Irrigation check failed: {e}") from e
     return {"decision": result}
 
 

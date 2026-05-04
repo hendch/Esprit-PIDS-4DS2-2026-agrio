@@ -16,10 +16,8 @@ from typing import Annotated, Any
 
 from app.middleware.auth import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.produce_prices.db_models import ProducePriceHistory
 from app.modules.produce_prices.repository import ProducePriceRepository
 from app.persistence.db import get_async_session
 
@@ -106,31 +104,43 @@ def _serialize_result(result: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.get("/products", response_model=list[ProductInfo])
-async def list_products(db: DbSession, _: dict = Depends(get_current_user)) -> list[ProductInfo]:
+async def list_products(_: dict = Depends(get_current_user)) -> list[ProductInfo]:
     """Return summary information for every produce product.
 
-    Fetches the most recent price row and total week count from the DB
-    for each of the 8 products.
+    Reads directly from the CSV source files so prices are always available
+    regardless of whether the DB history table has been populated.
     """
+    from app.modules.produce_prices.data.loader import ProduceDataLoader
+
+    loader = ProduceDataLoader()
+    all_data = loader.load_all()
+
     result: list[ProductInfo] = []
-
     for product in VALID_PRODUCTS:
-        # Count total non-null rows in DB
-        count_stmt = select(func.count()).where(
-            ProducePriceHistory.product == product
-        )
-        count_res = await db.execute(count_stmt)
-        weeks_count = count_res.scalar() or 0
+        df = all_data.get(product)
 
-        # Fetch most recent row
-        latest_stmt = (
-            select(ProducePriceHistory)
-            .where(ProducePriceHistory.product == product)
-            .order_by(ProducePriceHistory.price_date.desc())
-            .limit(1)
-        )
-        latest_res = await db.execute(latest_stmt)
-        latest_row = latest_res.scalar_one_or_none()
+        if df is None or df.empty:
+            result.append(
+                ProductInfo(
+                    product=product,
+                    category=CATEGORIES[product],
+                    display_name=DISPLAY_NAMES[product],
+                    unit="millimes/kg",
+                    latest_date=None,
+                    latest_retail_price=None,
+                    latest_wholesale_price=None,
+                    weeks_of_data=0,
+                )
+            )
+            continue
+
+        retail = df["retail_mid"].dropna()
+        wholesale = df["wholesale_mid"].dropna()
+
+        latest_date = retail.index[-1].strftime("%Y-%m-%d") if not retail.empty else None
+        latest_retail = round(float(retail.iloc[-1]), 2) if not retail.empty else None
+        latest_wholesale = round(float(wholesale.iloc[-1]), 2) if not wholesale.empty else None
+        weeks_count = int(retail.notna().sum())
 
         result.append(
             ProductInfo(
@@ -138,9 +148,9 @@ async def list_products(db: DbSession, _: dict = Depends(get_current_user)) -> l
                 category=CATEGORIES[product],
                 display_name=DISPLAY_NAMES[product],
                 unit="millimes/kg",
-                latest_date=latest_row.price_date.strftime("%Y-%m-%d") if latest_row else None,
-                latest_retail_price=round(latest_row.retail_mid, 2) if latest_row else None,
-                latest_wholesale_price=round(latest_row.wholesale_mid, 2) if latest_row else None,
+                latest_date=latest_date,
+                latest_retail_price=latest_retail,
+                latest_wholesale_price=latest_wholesale,
                 weeks_of_data=weeks_count,
             )
         )

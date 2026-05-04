@@ -1,3 +1,5 @@
+import { Platform } from "react-native";
+
 import { httpClient } from "../../core/api/httpClient";
 
 export type ScanResultDTO = {
@@ -35,5 +37,92 @@ export async function fetchScanHistory(): Promise<ScanResultDTO[]> {
 
 export async function fetchScanDetail(scanId: string): Promise<ScanResultDTO> {
   const { data } = await httpClient.get<ScanResultDTO>(`/api/v1/disease/scan/${scanId}`);
+  return data;
+}
+
+// ── Segmentation (online) ────────────────────────────────────
+
+export type SegmentationRegion = {
+  class_name: string;
+  confidence: number;
+  bbox: number[];
+};
+
+export type SegmentationResultDTO = {
+  annotated_image: string; // base64 JPEG
+  regions: SegmentationRegion[];
+  total_regions: number;
+};
+
+/**
+ * Send an image to the backend for YOLOv8 segmentation.
+ * Returns annotated image (base64) + detected regions.
+ */
+export async function requestSegmentation(imageUri: string): Promise<SegmentationResultDTO> {
+  const formData = new FormData();
+
+  const fileName = imageUri.split("/").pop() ?? "photo.jpg";
+  formData.append("image", {
+    uri: Platform.OS === "android" ? imageUri : imageUri.replace("file://", ""),
+    name: fileName,
+    type: "image/jpeg",
+  } as any);
+
+  const { data } = await httpClient.post<SegmentationResultDTO>(
+    "/api/v1/disease/segment",
+    formData,
+    {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 60_000, // segmentation can take a few seconds
+    },
+  );
+  return data;
+}
+
+// ── LLM advice + follow-up chat ─────────────────────────────
+
+export type AdvicePayload = {
+  disease_name: string;
+  plant_name: string;
+  confidence: number;
+  severity: string;
+  is_healthy: boolean;
+  locale: "en" | "ar";
+};
+
+export type AdviceResponseDTO = {
+  advice: string;
+  source: "llm" | "fallback";
+};
+
+export async function requestAdvice(payload: AdvicePayload): Promise<AdviceResponseDTO> {
+  const { data } = await httpClient.post<AdviceResponseDTO>(
+    "/api/v1/disease/advice",
+    payload,
+    { timeout: 30_000 },
+  );
+  return data;
+}
+
+export type ChatTurnDTO = { role: "user" | "assistant"; content: string };
+
+export type ChatRequestPayload = {
+  message: string;
+  history: ChatTurnDTO[];
+  locale: "en" | "ar";
+  original_advice?: string;
+};
+
+export type ChatResponseDTO = { reply: string };
+
+export async function sendChatMessage(
+  scanId: string,
+  payload: ChatRequestPayload,
+): Promise<ChatResponseDTO> {
+  const { data } = await httpClient.post<ChatResponseDTO>(
+    `/api/v1/disease/scan/${scanId}/chat`,
+    payload,
+    { timeout: 30_000 },
+  );
   return data;
 }

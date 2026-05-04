@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, time, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select
+from sqlalchemy.types import Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.irrigation.models import AppSetting, IrrigationEvent, IrrigationSchedule
@@ -95,7 +96,7 @@ class IrrigationRepository:
         return float(result.scalar_one() or 0.0)
 
     async def get_water_usage_history(self, limit: int = 7) -> dict:
-        day = func.date(IrrigationEvent.timestamp)
+        day = cast(IrrigationEvent.timestamp, Date)
         stmt = (
             select(day.label("date"), func.sum(IrrigationEvent.water_amount).label("total_amount"))
             .group_by(day)

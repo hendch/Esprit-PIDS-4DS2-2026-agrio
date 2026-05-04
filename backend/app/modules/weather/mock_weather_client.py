@@ -5,6 +5,17 @@ from typing import Any
 
 
 class MockWeatherProvider:
+    def get_today_sync(self, lat: float, lon: float) -> dict[str, Any]:
+        """Synchronous single-day mock data used by LangChain tools."""
+        return {
+            "temp_max": 30.2,
+            "temp_min": 19.4,
+            "humidity": 55.0,
+            "wind_speed": 8.5,
+            "precipitation": 0.0,
+            "et0": 5.2,
+        }
+
     async def get_forecast(
         self, lat: float, lon: float, days: int
     ) -> list[dict[str, Any]]:
