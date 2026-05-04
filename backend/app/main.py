@@ -49,6 +49,7 @@ async def _alert_checker_loop() -> None:
         await asyncio.sleep(3600)
 
 
+
 async def _daily_task_reset_loop() -> None:
     tz_tunis = timezone(timedelta(hours=1))
     while True:
@@ -62,6 +63,7 @@ async def _daily_task_reset_loop() -> None:
             "[DailyTasks] Reset at %s",
             datetime.now(tz_tunis).strftime("%Y-%m-%d %H:%M"),
         )
+
 
 
 async def autonomous_worker():
@@ -160,6 +162,7 @@ def _register_routers(application: FastAPI) -> None:
     from app.api.v1.auth.routes import router as auth_router
     from app.api.v1.disease.routes import router as disease_router
     from app.api.v1.fields.routes import router as fields_router
+    from app.api.v1.fertilizer.routes import router as fertilizer_router
     from app.api.v1.health.routes import router as health_router
     from app.api.v1.irrigation.routes import router as irrigation_router
     from app.api.v1.ledger.routes import router as ledger_router
@@ -178,6 +181,9 @@ def _register_routers(application: FastAPI) -> None:
     prefix = "/api/v1"
     application.include_router(auth_router, prefix=f"{prefix}/auth", tags=["auth"])
     application.include_router(fields_router, prefix=f"{prefix}/fields", tags=["fields"])
+    application.include_router(
+        fertilizer_router, prefix=f"{prefix}/fertilizer", tags=["fertilizer"]
+    )
     application.include_router(
         irrigation_router, prefix=f"{prefix}/irrigation", tags=["irrigation"]
     )

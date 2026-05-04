@@ -40,6 +40,7 @@ SLAUGHTER_WEIGHT_KG: dict[str, int] = {
 }
 
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -240,6 +241,7 @@ class LivestockService:
         if slaughter_weight and market_price is not None:
             price_per_kg = market_price
             market_price = market_price * slaughter_weight
+
 
         # Fetch latest straw (tbn) price for feed cost
         tbn_price = None

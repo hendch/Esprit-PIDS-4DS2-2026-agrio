@@ -161,6 +161,7 @@ async def add_health_event(
     return result
 
 
+
 @router.delete("/animals/{animal_id}/health/{event_id}")
 async def delete_health_event(
     animal_id: uuid.UUID,
