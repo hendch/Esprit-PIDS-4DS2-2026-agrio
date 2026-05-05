@@ -1,0 +1,1 @@
+XGBoost yield model loaded at FastAPI startup – never train here.

@@ -1,6 +1,5 @@
-import { TextInput } from "react-native";
 import { LineChart as RNLineChart } from "react-native-chart-kit";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -11,6 +10,7 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  TextInput,
   useWindowDimensions,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
@@ -22,8 +22,18 @@ import { useTheme } from "../../core/theme/useTheme";
 import { useLanguage } from "../../core/language/useLanguage";
 import { diagnoseImage, loadModel, DiagnosisResult } from "./diseaseDetectionService";
 import { DISEASE_DATA, SCREEN_LABELS } from "./diseaseAdviceData";
-import { saveScan, fetchScanHistory, ScanResultDTO } from "./diseaseApi";
 const LineChart: any = RNLineChart;
+import {
+  saveScan,
+  fetchScanHistory,
+  ScanResultDTO,
+  requestSegmentation,
+  SegmentationResultDTO,
+  requestAdvice,
+  sendChatMessage,
+  ChatTurnDTO,
+} from "./diseaseApi";
+
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
 const GREEN_LIGHT = "#E8F5E9";
@@ -69,6 +79,7 @@ function TabBar({ active }: { active: string }) {
     { key: "Crop", icon: "🌱", route: Routes.DiseaseDetection },
     { key: "Water", icon: "💧", route: Routes.Irrigation },
     { key: "Livestock", icon: "🎯", route: Routes.Livestock },
+    { key: "Prices", icon: "📈", route: Routes.MarketPrices },
     { key: "Community", icon: "👥", route: Routes.Community },
     { key: "Alerts", icon: "🔔", route: Routes.Alerts },
   ];
@@ -145,6 +156,21 @@ export function DiseaseDetectionScreen() {
     if (last < prev) return "📉 Declining";
     return "➡️ Stable";
   };
+  const [segResult, setSegResult] = useState<SegmentationResultDTO | null>(null);
+  const [segLoading, setSegLoading] = useState(false);
+  const [segError, setSegError] = useState(false);
+
+  // AI advisor state — backend Groq generates personalized advice + answers follow-ups.
+  // Falls back to the static dict if the LLM is unavailable.
+  const [scanId, setScanId] = useState<string | null>(null);
+  const [aiAdvice, setAiAdvice] = useState<string | null>(null);
+  const [aiAdviceLoading, setAiAdviceLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatHistory, setChatHistory] = useState<ChatTurnDTO[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const chatScrollRef = useRef<ScrollView>(null);
 
   // Preload model on mount
   useEffect(() => {
@@ -188,6 +214,15 @@ export function DiseaseDetectionScreen() {
   const runDiagnosis = async (imageUri: string) => {
     setIsLoading(true);
     setLastImageUri(imageUri);
+    setSegResult(null);
+    setSegError(false);
+    // Reset AI state for the new scan.
+    setScanId(null);
+    setAiAdvice(null);
+    setAiAdviceLoading(false);
+    setChatOpen(false);
+    setChatHistory([]);
+    setChatError(null);
     try {
       const result = await diagnoseImage(imageUri);
       setLastResult(result);
@@ -203,18 +238,21 @@ export function DiseaseDetectionScreen() {
       const info = DISEASE_DATA[result.name];
       const advice = info?.en?.advice ?? "";
 
-      // Save to backend (fire-and-forget — don't block the UI)
-      let savedId = Date.now().toString();
-      saveScan({
+      // Save to backend — needed for follow-up chat (chat is keyed by scan_id).
+      const savePromise = saveScan({
         disease_name: result.displayName,
         confidence: result.confidence,
         severity,
         plant_name: result.plant,
         is_healthy: result.isHealthy,
         guidance: advice || undefined,
-      })
+      });
+
+      let savedId = Date.now().toString();
+      savePromise
         .then((saved) => {
           savedId = saved.id;
+          setScanId(saved.id);
         })
         .catch((err) => console.warn("Failed to save scan to backend:", err));
 
@@ -236,10 +274,61 @@ export function DiseaseDetectionScreen() {
           health: result.isHealthy ? 100 : result.confidence,
         },
       ]);
+      // Request personalized advice from the LLM (non-blocking).
+      // The static dict still renders immediately; LLM advice replaces it on arrival.
+      setAiAdviceLoading(true);
+      requestAdvice({
+        disease_name: result.displayName,
+        plant_name: result.plant,
+        confidence: result.confidence,
+        severity,
+        is_healthy: result.isHealthy,
+        locale: language,
+      })
+        .then((res) => {
+          if (res.source === "llm" && res.advice) setAiAdvice(res.advice);
+        })
+        .catch((err) => console.warn("AI advice failed, using static fallback:", err))
+        .finally(() => setAiAdviceLoading(false));
+
+      // Fire segmentation request to backend (non-blocking for classification)
+      setSegLoading(true);
+      requestSegmentation(imageUri)
+        .then((seg) => setSegResult(seg))
+        .catch((err) => {
+          console.warn("Segmentation failed:", err);
+          setSegError(true);
+        })
+        .finally(() => setSegLoading(false));
     } catch (err: any) {
       Alert.alert("Diagnosis Failed", err.message || "Something went wrong.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSendChat = async (overrideMessage?: string) => {
+    const message = (overrideMessage ?? chatInput).trim();
+    if (!message || !scanId || chatLoading) return;
+    const next: ChatTurnDTO[] = [...chatHistory, { role: "user", content: message }];
+    setChatHistory(next);
+    setChatInput("");
+    setChatError(null);
+    setChatLoading(true);
+    try {
+      const res = await sendChatMessage(scanId, {
+        message,
+        history: chatHistory, // history BEFORE this message
+        locale: language,
+        original_advice: aiAdvice ?? undefined,
+      });
+      setChatHistory([...next, { role: "assistant", content: res.reply }]);
+      // Scroll to bottom after render
+      setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 50);
+    } catch (err: any) {
+      setChatError(labels.chatError);
+    } finally {
+      setChatLoading(false);
     }
   };
 
@@ -369,7 +458,19 @@ export function DiseaseDetectionScreen() {
           return (
             <>
               <View style={styles.resultCard}>
-                <Image source={{ uri: lastImageUri }} style={styles.resultImage} />
+                {segResult ? (
+                  <Image
+                    source={{ uri: `data:image/jpeg;base64,${segResult.annotated_image}` }}
+                    style={styles.resultImage}
+                  />
+                ) : (
+                  <Image source={{ uri: lastImageUri }} style={styles.resultImage} />
+                )}
+                {segLoading && (
+                  <View style={styles.segLoadingOverlay}>
+                    <ActivityIndicator size="small" color="#FFF" />
+                  </View>
+                )}
                 <View style={styles.resultBody}>
                   <Text style={[styles.resultTitle, isRTL && styles.rtlText]}>{displayName}</Text>
                   <Text style={[styles.resultConfidence, isRTL && styles.rtlText]}>
@@ -398,15 +499,145 @@ export function DiseaseDetectionScreen() {
                 </View>
               </View>
 
-              {/* Advice Card */}
-              {advice ? (
+              {/* Advice Card — shows static fallback immediately, then LLM-enhanced when ready */}
+              {(advice || aiAdvice) ? (
                 <View style={[styles.adviceCard, lastResult.isHealthy ? styles.adviceCardHealthy : styles.adviceCardDisease]}>
-                  <Text style={[styles.adviceTitle, isRTL && styles.rtlText]}>
-                    {lastResult.isHealthy ? `🌱 ${labels.healthyAdvice}` : `⚕️ ${labels.treatmentAdvice}`}
+                  <View style={styles.adviceHeader}>
+                    <Text style={[styles.adviceTitle, isRTL && styles.rtlText]}>
+                      {lastResult.isHealthy ? `🌱 ${labels.healthyAdvice}` : `⚕️ ${labels.treatmentAdvice}`}
+                    </Text>
+                    {aiAdvice && (
+                      <View style={styles.aiBadge}>
+                        <Text style={styles.aiBadgeText}>✨ {labels.aiPoweredBadge}</Text>
+                      </View>
+                    )}
+                  </View>
+                  {aiAdviceLoading && !aiAdvice && (
+                    <View style={styles.aiLoadingRow}>
+                      <ActivityIndicator size="small" color={GREEN} />
+                      <Text style={[styles.aiLoadingText, isRTL && styles.rtlText]}>
+                        {labels.aiEnhancing}
+                      </Text>
+                    </View>
+                  )}
+                  <Text style={[styles.adviceText, isRTL && styles.rtlText]}>
+                    {aiAdvice || advice}
                   </Text>
-                  <Text style={[styles.adviceText, isRTL && styles.rtlText]}>{advice}</Text>
+
+                  {scanId && !chatOpen && (
+                    <Pressable
+                      style={({ pressed }) => [styles.askButton, pressed && styles.askButtonPressed]}
+                      onPress={() => setChatOpen(true)}
+                    >
+                      <Text style={styles.askButtonText}>💬 {labels.askFollowUp}</Text>
+                    </Pressable>
+                  )}
                 </View>
               ) : null}
+
+              {/* Chat panel — opens after advice, scoped to current scan */}
+              {scanId && chatOpen && (
+                <View style={styles.chatCard}>
+                  <View style={styles.chatHeader}>
+                    <Text style={[styles.chatTitle, isRTL && styles.rtlText]}>
+                      🤖 {labels.chatTitle}
+                    </Text>
+                    <TouchableOpacity onPress={() => setChatOpen(false)}>
+                      <Text style={styles.chatClose}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <ScrollView
+                    ref={chatScrollRef}
+                    style={styles.chatMessages}
+                    contentContainerStyle={styles.chatMessagesContent}
+                  >
+                    {chatHistory.length === 0 && (
+                      <View style={styles.chatEmptyState}>
+                        <Text style={[styles.chatEmptyText, isRTL && styles.rtlText]}>
+                          {labels.chatEmpty}
+                        </Text>
+                        {[labels.chatSuggestion1, labels.chatSuggestion2, labels.chatSuggestion3].map((sugg) => (
+                          <Pressable
+                            key={sugg}
+                            style={({ pressed }) => [styles.chatSuggestion, pressed && { opacity: 0.7 }]}
+                            onPress={() => handleSendChat(sugg)}
+                            disabled={chatLoading}
+                          >
+                            <Text style={[styles.chatSuggestionText, isRTL && styles.rtlText]}>
+                              {sugg}
+                            </Text>
+                          </Pressable>
+                        ))}
+                      </View>
+                    )}
+
+                    {chatHistory.map((turn, idx) => (
+                      <View
+                        key={idx}
+                        style={[
+                          styles.chatBubble,
+                          turn.role === "user" ? styles.chatBubbleUser : styles.chatBubbleAssistant,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.chatBubbleText,
+                            turn.role === "user" && styles.chatBubbleTextUser,
+                            isRTL && styles.rtlText,
+                          ]}
+                        >
+                          {turn.content}
+                        </Text>
+                      </View>
+                    ))}
+
+                    {chatLoading && (
+                      <View style={[styles.chatBubble, styles.chatBubbleAssistant]}>
+                        <ActivityIndicator size="small" color={GREEN} />
+                      </View>
+                    )}
+
+                    {chatError && (
+                      <Text style={[styles.chatErrorText, isRTL && styles.rtlText]}>
+                        ⚠️ {chatError}
+                      </Text>
+                    )}
+                  </ScrollView>
+
+                  <View style={styles.chatInputRow}>
+                    <TextInput
+                      style={[styles.chatInput, isRTL && styles.rtlText]}
+                      placeholder={labels.chatPlaceholder}
+                      placeholderTextColor="#999"
+                      value={chatInput}
+                      onChangeText={setChatInput}
+                      multiline
+                      maxLength={2000}
+                      editable={!chatLoading}
+                    />
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.chatSendButton,
+                        (!chatInput.trim() || chatLoading) && styles.chatSendButtonDisabled,
+                        pressed && styles.askButtonPressed,
+                      ]}
+                      onPress={() => handleSendChat()}
+                      disabled={!chatInput.trim() || chatLoading}
+                    >
+                      <Text style={styles.chatSendText}>↑</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              )}
+
+              {segError && !segLoading && (
+                <View style={styles.segErrorCard}>
+                  <Text style={[styles.segErrorText, isRTL && styles.rtlText]}>
+                    {labels.segmentationFailed}
+                  </Text>
+                </View>
+              )}
             </>
           );
         })()}
@@ -642,6 +873,14 @@ const styles = StyleSheet.create({
     height: 200,
     resizeMode: "cover",
   },
+  segLoadingOverlay: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    borderRadius: 16,
+    padding: 6,
+  },
   resultBody: { padding: 16 },
   resultTitle: { fontSize: 20, fontWeight: "700", color: "#2C2C2C", marginBottom: 8 },
   resultConfidence: { fontSize: 16, color: "#555", marginBottom: 4 },
@@ -757,4 +996,164 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#EEE",
   },
+  segCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    overflow: "hidden",
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#90CAF9",
+  },
+  segBody: { padding: 16 },
+  segTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#2C2C2C",
+    marginBottom: 10,
+  },
+  segRegionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F0F0",
+  },
+  segRegionName: { fontSize: 14, color: "#444", flex: 1 },
+  segRegionConf: { fontSize: 14, fontWeight: "600", color: GREEN },
+  segErrorCard: {
+    backgroundColor: "#FFF3E0",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#FFCC80",
+    alignItems: "center",
+  },
+  segErrorText: { fontSize: 14, color: "#E65100" },
+
+  // AI advice + chat
+  adviceHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  aiBadge: {
+    backgroundColor: GREEN,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  aiBadgeText: {
+    color: "#FFF",
+    fontSize: 11,
+    fontWeight: "700",
+    letterSpacing: 0.3,
+  },
+  aiLoadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 8,
+  },
+  aiLoadingText: { fontSize: 12, color: "#666", fontStyle: "italic" },
+  askButton: {
+    marginTop: 14,
+    backgroundColor: GREEN,
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  askButtonPressed: { opacity: 0.85 },
+  askButtonText: { color: "#FFF", fontSize: 14, fontWeight: "600" },
+  chatCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#A5D6A7",
+    overflow: "hidden",
+  },
+  chatHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: GREEN_LIGHT,
+    borderBottomWidth: 1,
+    borderBottomColor: "#A5D6A7",
+  },
+  chatTitle: { fontSize: 15, fontWeight: "700", color: "#2C2C2C" },
+  chatClose: { fontSize: 18, color: "#666", paddingHorizontal: 6 },
+  chatMessages: { maxHeight: 320 },
+  chatMessagesContent: { padding: 12, gap: 8 },
+  chatEmptyState: { gap: 8 },
+  chatEmptyText: { fontSize: 13, color: "#666", marginBottom: 4 },
+  chatSuggestion: {
+    backgroundColor: "#F5F5F5",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+  },
+  chatSuggestionText: { fontSize: 13, color: "#444" },
+  chatBubble: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    maxWidth: "85%",
+  },
+  chatBubbleUser: {
+    backgroundColor: GREEN,
+    alignSelf: "flex-end",
+    borderBottomRightRadius: 4,
+  },
+  chatBubbleAssistant: {
+    backgroundColor: "#F0F0F0",
+    alignSelf: "flex-start",
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: { fontSize: 14, color: "#2C2C2C", lineHeight: 20 },
+  chatBubbleTextUser: { color: "#FFF" },
+  chatErrorText: {
+    fontSize: 13,
+    color: "#E53935",
+    textAlign: "center",
+    marginTop: 6,
+  },
+  chatInputRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    padding: 10,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#EEE",
+    backgroundColor: "#FAFAFA",
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: "#FFF",
+    borderWidth: 1,
+    borderColor: "#E0E0E0",
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: "#2C2C2C",
+    maxHeight: 100,
+    minHeight: 40,
+  },
+  chatSendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: GREEN,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chatSendButtonDisabled: { backgroundColor: "#BDBDBD" },
+  chatSendText: { color: "#FFF", fontSize: 22, fontWeight: "700", lineHeight: 24 },
 });

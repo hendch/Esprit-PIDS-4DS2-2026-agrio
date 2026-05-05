@@ -5,6 +5,7 @@ export const Routes = {
   Irrigation: "Irrigation",
   Satellite: "Satellite",
   FieldDetail: "FieldDetail",
+  FieldBoundarySetup: "FieldBoundarySetup",
   DiseaseDetection: "DiseaseDetection",
   Livestock: "Livestock",
   Community: "Community",
@@ -15,6 +16,8 @@ export const Routes = {
   UserSearch: "UserSearch",
   Chat: "Chat",
 
+  MarketPrices: "MarketPrices",
+  ProducePrices: "ProducePrices",
 } as const;
 
 export type RouteName = (typeof Routes)[keyof typeof Routes];

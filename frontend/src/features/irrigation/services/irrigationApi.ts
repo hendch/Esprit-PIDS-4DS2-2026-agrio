@@ -6,7 +6,15 @@ export interface IrrigationDecisionResponse {
 
 export interface DashboardData {
   weather: any[] | null;
-  moisture: { moisture_percent: number; status: string; history?: any[] } | null;
+  moisture: {
+    moisture_percent: number;
+    status: string;
+    history?: any[];
+    mqtt_connected?: boolean;
+    live?: boolean;
+    topic?: string;
+    waited_for_message?: boolean;
+  } | null;
   usage_today: number | null;
   usage_history?: { history: any[]; water_saved_pct: number } | null;
 }
@@ -17,6 +25,18 @@ export interface ScheduleRequest {
   start_time: string;
   duration_minutes: number;
   water_volume: number;
+}
+
+export type ScheduleStatus = "pending" | "doing" | "done" | "cancelled";
+
+export interface Schedule {
+  id: string;
+  field_id: string;
+  target_date: string;
+  start_time: string;
+  duration_minutes: number;
+  water_volume: number;
+  status: ScheduleStatus;
 }
 
 export const irrigationApi = {
@@ -57,6 +77,15 @@ export const irrigationApi = {
     }
   },
 
+  cancelSchedule: async (scheduleId: string): Promise<void> => {
+    try {
+      await httpClient.delete(`/api/v1/irrigation/schedules/${scheduleId}`);
+    } catch (error) {
+      console.error("Error cancelling schedule:", error);
+      throw error;
+    }
+  },
+
   getAutonomousState: async (): Promise<{ autonomous: boolean }> => {
     try {
       const response = await httpClient.get("/api/v1/irrigation/autonomous");
@@ -76,7 +105,7 @@ export const irrigationApi = {
     }
   },
 
-  getSchedules: async (): Promise<{ schedules: any[] }> => {
+  getSchedules: async (): Promise<{ schedules: Schedule[] }> => {
     try {
       const response = await httpClient.get("/api/v1/irrigation/schedules");
       return response.data;

@@ -8,6 +8,21 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from app.persistence.base_model import Base
 from app.settings import settings
 
+# Import all model modules so SQLAlchemy metadata is fully populated for autogenerate.
+import app.modules.analytics.models  # noqa: F401
+import app.modules.auth.models  # noqa: F401
+import app.modules.disease.models  # noqa: F401
+import app.modules.farms.models  # noqa: F401
+import app.modules.irrigation.models  # noqa: F401
+import app.modules.ledger.models  # noqa: F401
+import app.modules.livestock.models  # noqa: F401
+import app.modules.market_prices.db_models  # noqa: F401
+import app.modules.media.models  # noqa: F401
+import app.modules.notification.models  # noqa: F401
+import app.modules.produce_prices.db_models  # noqa: F401
+import app.modules.satellite.models  # noqa: F401
+import app.modules.community.models  # noqa: F401
+
 target_metadata = Base.metadata
 
 

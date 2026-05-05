@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.middleware.auth import get_current_user
 
 from app.modules.irrigation.repository import IrrigationRepository
 from app.modules.iot_gateway.mqtt_client import MqttSensorProvider
@@ -32,7 +33,6 @@ def _get_agent():
     global _agent
     if _agent is None:
         from app.modules.ai.agent.orchestrator import IrrigationAgent
-
         _agent = IrrigationAgent()
     return _agent
 
@@ -49,13 +49,16 @@ async def check_irrigation(data: dict):
     lat = data.get("lat", 36.8)
     lon = data.get("lon", 10.18)
     query = f"Should I irrigate {crop} at {lat},{lon}?"
-    result = _get_agent().run(
-        query=query,
-        crop=crop,
-        growth_stage=growth_stage,
-        lat=float(lat),
-        lon=float(lon),
-    )
+    try:
+        result = _get_agent().run(
+            query=query,
+            crop=crop,
+            growth_stage=growth_stage,
+            lat=float(lat),
+            lon=float(lon),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Irrigation check failed: {e}") from e
     return {"decision": result}
 
 
@@ -69,7 +72,6 @@ async def get_history(session: AsyncSession = Depends(get_async_session)):
 @router.get("/recommendation/{field_id}")
 async def get_recommendation(field_id: str):
     """Get irrigation recommendation for a field (placeholder)."""
-    # TODO: look up field coords from farms module
     result = _get_agent().run(
         query=f"Should I irrigate the field {field_id}?",
         crop="wheat",
@@ -84,7 +86,6 @@ async def get_recommendation(field_id: str):
 async def get_dashboard_data(session: AsyncSession = Depends(get_async_session)):
     """Unified endpoint to grab remote data without crashing if one fails."""
     import logging
-
     log = logging.getLogger(__name__)
 
     weather_data = None
@@ -95,7 +96,6 @@ async def get_dashboard_data(session: AsyncSession = Depends(get_async_session))
 
     moisture_data = None
     try:
-        # Wait briefly for a real MQTT reading so dashboard shows live:true when Wokwi/sim is publishing.
         moisture_data = _sensor.get_latest_reading_sync()
     except Exception as e:
         log.warning("MQTT Sensor failed: %s", e)
@@ -124,8 +124,9 @@ async def get_dashboard_data(session: AsyncSession = Depends(get_async_session))
 async def create_schedule(
     data: ScheduleRequest,
     session: AsyncSession = Depends(get_async_session),
+    current_user: dict = Depends(get_current_user),
 ):
-    """Save an irrigation schedule."""
+    """Save an irrigation schedule tied to the logged-in user."""
     try:
         schedule_id = await _get_repo(session).add_schedule(
             field_id=data.field_id,
@@ -133,10 +134,39 @@ async def create_schedule(
             start_time=data.start_time,
             duration_minutes=data.duration_minutes,
             water_volume=data.water_volume,
+            user_id=current_user["user_id"],
         )
         return {"status": "success", "schedule_id": schedule_id}
     except Exception as e:
+        import traceback
+        print("=== SCHEDULE CREATION ERROR ===")
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.delete("/schedules/{schedule_id}")
+async def cancel_schedule(
+    schedule_id: str,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Cancel a pending irrigation schedule.
+    Returns 404 if not found / not owned by user.
+    Returns 409 if the schedule is already running or completed.
+    """
+    success = await _get_repo(session).cancel_schedule(
+        schedule_id=schedule_id,
+        user_id=current_user["user_id"],
+    )
+    if not success:
+        # Distinguish "not found" from "wrong state" would require an extra DB read;
+        # 409 is a reasonable default since 404 could be a security leak.
+        raise HTTPException(
+            status_code=409,
+            detail="Schedule could not be cancelled. It may not exist, belong to you, or may already be running/completed.",
+        )
+    return {"status": "cancelled", "schedule_id": schedule_id}
 
 
 @router.get("/autonomous")
@@ -156,6 +186,13 @@ async def set_autonomous(
 
 
 @router.get("/schedules")
-async def get_schedules(session: AsyncSession = Depends(get_async_session)):
-    """Get the recent irrigation schedules."""
-    return {"schedules": await _get_repo(session).get_schedules()}
+async def get_schedules(
+    session: AsyncSession = Depends(get_async_session),
+    current_user: dict = Depends(get_current_user),
+):
+    """Get irrigation schedules for the logged-in user only."""
+    return {
+        "schedules": await _get_repo(session).get_schedules(
+            user_id=current_user["user_id"]
+        )
+    }

@@ -7,13 +7,13 @@ import {
   ScrollView,
   StyleSheet,
   KeyboardAvoidingView,
-  Platform,
   Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { useUserStore } from "../../core/userStore/userStore";
 import { useTheme } from "../../core/theme/useTheme";
 import { authApi } from "./services/authApi";
+import { registerPushToken } from "../../core/notifications/notificationService";
 import { Routes } from "../../core/navigation/routes";
 import { getApiErrorMessage, validateEmail, validatePassword } from "./services/authValidation";
 
@@ -58,6 +58,8 @@ export function LoginScreen() {
         accessToken: result.access_token,
         refreshToken: result.refresh_token,
       });
+      // Fire-and-forget — don't block navigation on permission prompt timing
+      registerPushToken().catch(() => {});
       setTimeout(() => {
         nav.navigate(Routes.Dashboard);
       }, 0);
@@ -75,7 +77,7 @@ export function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      behavior="height"
       style={[styles.container, { backgroundColor: colors.background }]}
     >
       <ScrollView
