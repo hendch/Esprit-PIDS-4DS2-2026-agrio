@@ -12,6 +12,9 @@ const SUMMARY = [
   { emoji: '🔔', label: 'Price alerts' },
   { emoji: '📈', label: 'AI price forecasts' },
   { emoji: '🎯', label: 'Sell recommendations' },
+  { emoji: '🗺️', label: 'Field & land management' },
+  { emoji: '🌿', label: 'Crop disease detection' },
+  { emoji: '💧', label: 'Smart irrigation' },
   { emoji: '🌱', label: 'Community connection' },
 ];
 

@@ -8,6 +8,7 @@ const TASK_LABELS: Record<string, string> = {
   generate_forecast:   'Generated a forecast',
   post_or_comment:     'Engaged in community',
   record_health_event: 'Recorded health event',
+  check_irrigation:    'Evaluated irrigation field',
 };
 
 interface GamificationState {

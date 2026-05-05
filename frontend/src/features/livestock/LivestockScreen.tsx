@@ -323,6 +323,7 @@ function HealthEventModal({
         event_date: eventDate.trim(),
       });
       onClose();
+      setTimeout(() => useGamificationStore.getState().completeTask('record_health_event'), 400);
     } catch (e: any) {
       setLocalError(e?.message ?? 'Error saving event');
     }

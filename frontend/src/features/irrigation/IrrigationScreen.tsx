@@ -19,6 +19,8 @@ import { Routes } from "../../core/navigation/routes";
 import { useDrawerStore } from "../../core/drawer/drawerStore";
 import { useTheme } from "../../core/theme/useTheme";
 import { irrigationApi, DashboardData, Schedule, ScheduleStatus } from "./services/irrigationApi";
+import { useGamificationStore } from "../gamification/store";
+import { useTutorialStore } from "../../core/tutorial/store";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
@@ -192,6 +194,8 @@ export function IrrigationScreen() {
       };
       setActivityLog(prev => [newLog, ...prev]);
       loadDashboard();
+      useGamificationStore.getState().completeTask('check_irrigation');
+      useTutorialStore.getState().checkAndAdvance('check_water');
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Failed to reach backend API.");

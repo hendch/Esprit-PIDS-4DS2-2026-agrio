@@ -358,6 +358,7 @@ export function CommunityScreen() {
     try {
       await store.submitPost(postContent.trim(), postCategory, mediaUrl);
       closeModal();
+      setTimeout(() => useGamificationStore.getState().completeTask('post_or_comment'), 400);
     } catch {
       // error visible in store.error; Alert shown below
       Alert.alert('Error', store.error ?? 'Could not create post.');
@@ -568,44 +569,6 @@ export function CommunityScreen() {
           />
         </>
       )}
-
-      {/* post list */}
-      <FlatList
-        data={posts}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            onPress={() => openPostDetail(item)}
-            onLike={() => store.likePost(item.id)}
-            onDelete={() => confirmDeletePost(item.id)}
-            truncate
-          />
-        )}
-        onEndReached={store.loadMore}
-        onEndReachedThreshold={0.3}
-        onRefresh={() => store.fetchFeed(true)}
-        refreshing={loading && page === 0}
-        ListEmptyComponent={
-          loading ? (
-            <ActivityIndicator color={GREEN} style={{ marginTop: 60 }} />
-          ) : (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyEmoji}>🌱</Text>
-              <Text style={styles.emptyTitle}>No posts yet in this category</Text>
-              <Text style={styles.emptySubtitle}>
-                Be the first to share something with the community
-              </Text>
-            </View>
-          )
-        }
-        ListFooterComponent={
-          loading && page > 0 ? (
-            <ActivityIndicator color={GREEN} style={{ marginVertical: 16 }} />
-          ) : null
-        }
-        contentContainerStyle={{ paddingTop: 8, paddingBottom: 80 + 24 }}
-      />
 
       <TabBar active="Community" />
     </View>

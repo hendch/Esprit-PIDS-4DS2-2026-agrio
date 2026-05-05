@@ -37,6 +37,7 @@ import {
   getFertilizerRecommendation,
 } from "./fertilizerRecommendationService";
 import { cropValueToLabel } from "./fieldVocabulary";
+import { useTutorialStore } from "../../core/tutorial/store";
 
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
@@ -333,6 +334,9 @@ export function FieldDetailScreen() {
   const { width } = useWindowDimensions();
   const { colors } = useTheme();
   const sensorPickerMapRef = useRef<MapView | null>(null);
+
+  const tutorial = useTutorialStore();
+  const showFieldGotIt = tutorial.currentStep?.key === 'view_field' && tutorial.isVisible;
 
   const params = route.params as RouteParams | undefined;
   const fieldId = params?.fieldId;
@@ -1035,6 +1039,15 @@ export function FieldDetailScreen() {
               )}
 
               {fertilizerError ? <Text style={styles.inlineErrorText}>{fertilizerError}</Text> : null}
+
+              {showFieldGotIt && (
+                <Pressable
+                  onPress={() => tutorial.checkAndAdvance('view_field')}
+                  style={{ marginTop: 12, backgroundColor: '#2E7D32', borderRadius: 8, paddingVertical: 10, alignItems: 'center' }}
+                >
+                  <Text style={{ color: 'white', fontWeight: '600', fontSize: 14 }}>✓ Got it — I've seen the field details</Text>
+                </Pressable>
+              )}
             </View>
 
             <View style={styles.card}>
