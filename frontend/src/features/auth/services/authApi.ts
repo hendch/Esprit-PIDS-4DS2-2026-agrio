@@ -27,13 +27,15 @@ export const authApi = {
     lastName: string;
     email: string;
     password: string;
-  }): Promise<void> {
+  }): Promise<LoginResponse> {
     const displayName = `${payload.firstName.trim()} ${payload.lastName.trim()}`.trim();
-    await httpClient.post("/api/v1/auth/register", {
+    const response = await httpClient.post("/api/v1/auth/register", {
       email: payload.email,
       password: payload.password,
       display_name: displayName,
     });
+
+    return response.data;
   },
 
   /** Requires `accessToken` in the user store (set after login). */

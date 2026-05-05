@@ -1,3 +1,5 @@
+import { TextInput } from "react-native";
+import { LineChart as RNLineChart } from "react-native-chart-kit";
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -21,7 +23,7 @@ import { useLanguage } from "../../core/language/useLanguage";
 import { diagnoseImage, loadModel, DiagnosisResult } from "./diseaseDetectionService";
 import { DISEASE_DATA, SCREEN_LABELS } from "./diseaseAdviceData";
 import { saveScan, fetchScanHistory, ScanResultDTO } from "./diseaseApi";
-
+const LineChart: any = RNLineChart;
 const OFFSET_WHITE = "#FAFAF8";
 const GREEN = "#4CAF50";
 const GREEN_LIGHT = "#E8F5E9";
@@ -33,8 +35,15 @@ type DiagnosisEntry = {
   name: string;
   confidence: number;
   date: string;
+  rawDate: string;
   severity: Severity;
   thumbnailUri?: string;
+};
+
+//ons
+type TimelinePoint = {
+  date: string;
+  health: number;
 };
 
 function getSeverity(confidence: number, isHealthy: boolean): Severity {
@@ -49,6 +58,7 @@ function severityColor(s: Severity): string {
   if (s === "Medium") return "#FF9800";
   return "#2196F3";
 }
+
 
 function TabBar({ active }: { active: string }) {
   const nav = useNavigation<any>();
@@ -88,6 +98,53 @@ export function DiseaseDetectionScreen() {
   const [modelReady, setModelReady] = useState(false);
   const [lastResult, setLastResult] = useState<DiagnosisResult | null>(null);
   const [lastImageUri, setLastImageUri] = useState<string | null>(null);
+  //ons
+  const [searchText, setSearchText] = useState("");
+  const [selectedSeverity, setSelectedSeverity] = useState<Severity | "All">("All");
+  const [selectedDateRange, setSelectedDateRange] = useState<"All" | "7d">("All");
+  const [timeline, setTimeline] = useState<TimelinePoint[]>([]);
+  const latest = timeline[timeline.length - 1];
+  const getHealthStatus = (value: number) => {
+    if (value >= 90) return "🌱 Excellent";
+    if (value >= 75) return "✅ Good";
+    if (value >= 60) return "⚠️ Moderate";
+    return "🚨 Critical";
+  };
+  const matchesSearch = (entry: DiagnosisEntry) => {
+    const text = searchText.toLowerCase();
+    return (
+      entry.name.toLowerCase().includes(text) ||
+      entry.severity.toLowerCase().includes(text)
+    );
+  };
+  const isWithinLast7Days = (rawDate: string) => {
+    const entryDate = new Date(rawDate);
+    const today = new Date();
+    const diffTime = today.getTime() - entryDate.getTime();
+    const diffDays = diffTime / (1000 * 60 * 60 * 24);
+    return diffDays <= 7;
+  };
+  const filteredHistory = history.filter((entry) => {
+    // Search
+    if (searchText && !matchesSearch(entry)) return false;
+    // Severity
+    if (selectedSeverity !== "All" && entry.severity !== selectedSeverity) return false;
+    // Date
+    if (selectedDateRange === "7d" && !isWithinLast7Days(entry.rawDate)) return false;
+    return true;
+  });
+
+
+  const getTrend = () => {
+    if (timeline.length < 2) return "Not enough data";
+
+    const last = timeline[timeline.length - 1].health;
+    const prev = timeline[timeline.length - 2].health;
+
+    if (last > prev) return "📈 Improving";
+    if (last < prev) return "📉 Declining";
+    return "➡️ Stable";
+  };
 
   // Preload model on mount
   useEffect(() => {
@@ -109,9 +166,21 @@ export function DiseaseDetectionScreen() {
             day: "numeric",
             year: "numeric",
           }),
+          rawDate: s.scanned_at,
           severity: getSeverity(s.confidence ?? 0, s.is_healthy),
         }));
         setHistory(entries);
+
+        //ons
+        const timelineData = scans
+          .sort((a, b) => new Date(a.scanned_at).getTime() - new Date(b.scanned_at).getTime())
+          .map((s) => ({
+            date: new Date(s.scanned_at).toISOString().split("T")[0],
+            health: s.is_healthy ? 100 : 100 - (s.confidence ?? 0)
+          }));
+
+        setTimeline(timelineData);
+
       })
       .catch((err) => console.warn("Failed to load scan history:", err));
   }, []);
@@ -154,11 +223,19 @@ export function DiseaseDetectionScreen() {
         name: result.displayName,
         confidence: result.confidence,
         date: today,
+        rawDate: new Date().toISOString(),
         severity,
         thumbnailUri: imageUri,
       };
-
       setHistory((prev) => [entry, ...prev]);
+
+      setTimeline((prev) => [
+        ...prev,
+        {
+          date: new Date().toISOString().split("T")[0],
+          health: result.isHealthy ? 100 : result.confidence,
+        },
+      ]);
     } catch (err: any) {
       Alert.alert("Diagnosis Failed", err.message || "Something went wrong.");
     } finally {
@@ -333,13 +410,125 @@ export function DiseaseDetectionScreen() {
             </>
           );
         })()}
+        {/* timeline */}
+        <Text style={styles.sectionTitle}>Health Timeline</Text>
+
+        <View style={styles.timelineCard}>
+          {timeline.length > 0 ? (
+            <LineChart
+              data={{
+                labels: timeline.map((p) => {
+                  const d = new Date(p.date);
+                  return `${d.getDate()}/${d.getMonth() + 1}`;
+                }),
+                datasets: [
+                  {
+                    data: timeline.map((p) => p.health),
+                  },
+                ],
+              }}
+              width={width - 80}
+              height={200}
+              yAxisSuffix="%"
+              chartConfig={{
+                backgroundGradientFrom: "#ffffff",
+                backgroundGradientTo: "#ffffff",
+                decimalPlaces: 0,
+                color: (opacity = 1) => `rgba(76, 175, 80, ${opacity})`,
+                labelColor: (opacity = 1) => `rgba(0, 0, 0, ${opacity})`,
+                propsForDots: {
+                  r: "5",
+                  strokeWidth: "2",
+                  stroke: "#4CAF50",
+                },
+              }}
+              style={{ borderRadius: 12 }}
+            />
+          ) : (
+            <Text style={{ color: "#999", fontStyle: "italic" }}>
+              No data yet. Scan a plant to see timeline.
+            </Text>
+          )}
+
+          {latest && (
+            <View style={{ marginTop: 10 }}>
+              <Text>Status: {getHealthStatus(latest.health)}</Text>
+              <Text>Trend: {getTrend()}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={[styles.sectionTitle, isRTL && styles.rtlText]}>{labels.diagnosisHistory}</Text>
+        {/* 🔍 Search  */}
+        <View style={{ marginBottom: 16 }}>
+          {/* Search Input */}
+          <View style={{
+            backgroundColor: "#F5F5F5",
+            borderRadius: 10,
+            paddingHorizontal: 10,
+            paddingVertical: 8
+          }}>
+            <TextInput
+              placeholder="🔍 Search disease ..."
+              value={searchText}
+              onChangeText={setSearchText}
+            />
+          </View>
+
+          {/* Filters */}
+          <View style={{ flexDirection: "row", marginTop: 10, gap: 10 }}>
+
+            {/* Severity Filter */}
+            {[
+              { label: "All", color: "#9E9E9E" },
+              { label: "High", color: "#E53935" },
+              { label: "Medium", color: "#FF9800" },
+              { label: "Low", color: "#2196F3" },
+            ].map((item) => {
+              const isSelected = selectedSeverity === item.label;
+
+              return (
+                <Pressable
+                  key={item.label}
+                  onPress={() => setSelectedSeverity(item.label as any)}
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 6,
+                    borderRadius: 8,
+                    backgroundColor: isSelected ? item.color : "#EEE",
+                  }}
+                >
+                  <Text style={{ color: isSelected ? "#FFF" : "#333" }}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+
+            {/* Date Filter */}
+            <Pressable
+              onPress={() =>
+                setSelectedDateRange(selectedDateRange === "7d" ? "All" : "7d")
+              }
+              style={{
+                paddingHorizontal: 10,
+                paddingVertical: 6,
+                borderRadius: 8,
+                backgroundColor: selectedDateRange === "7d" ? "#4CAF50" : "#EEE"
+              }}
+            >
+              <Text style={{ color: selectedDateRange === "7d" ? "#FFF" : "#333" }}>
+                Last 7 days
+              </Text>
+            </Pressable>
+
+          </View>
+        </View>
 
         {/* Diagnosis History */}
-        <Text style={[styles.sectionTitle, isRTL && styles.rtlText]}>{labels.diagnosisHistory}</Text>
         {history.length === 0 && (
           <Text style={[styles.emptyHistory, isRTL && styles.rtlText]}>{labels.noHistory}</Text>
         )}
-        {history.map((entry) => (
+        {filteredHistory.map((entry) => (
           <View key={entry.id} style={styles.historyCard}>
             <View style={styles.historyThumb}>
               {entry.thumbnailUri ? (
@@ -559,5 +748,13 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: "#444",
     lineHeight: 24,
+  },
+  timelineCard: {
+    backgroundColor: "#FFF",
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "#EEE",
   },
 });

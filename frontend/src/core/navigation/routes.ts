@@ -10,6 +10,11 @@ export const Routes = {
   Community: "Community",
   Alerts: "Alerts",
   FarmTrustLedger: "FarmTrustLedger",
+
+  Messages: "Messages",
+  UserSearch: "UserSearch",
+  Chat: "Chat",
+
 } as const;
 
 export type RouteName = (typeof Routes)[keyof typeof Routes];

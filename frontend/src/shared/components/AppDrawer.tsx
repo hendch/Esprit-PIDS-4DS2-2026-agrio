@@ -21,6 +21,7 @@ import { GREEN } from "../../core/theme/themeColors";
 const DRAWER_WIDTH = 280;
 
 const MENU_ITEMS = [
+  { icon: "💬", label: "Farmer Connect", route: Routes.Messages },
   { icon: "👤", label: "Profile" },
   { icon: "⚙️", label: "Settings" },
   { icon: "🔔", label: "Notifications" },
@@ -64,7 +65,6 @@ export function AppDrawer() {
   const handleLogout = () => {
     closeDrawer();
     clearUser();
-    nav.reset({ index: 0, routes: [{ name: Routes.Login }] });
   };
 
   const name = displayName ?? "User";
@@ -125,7 +125,14 @@ export function AppDrawer() {
             <TouchableOpacity
               key={item.label}
               style={[styles.menuItem, { borderBottomColor: colors.cardBorder }]}
-              onPress={() => closeDrawer()}
+
+              onPress={() => {
+                closeDrawer();
+                if ("route" in item && item.route) {
+                  nav.navigate(item.route);
+                }
+              }}
+
               activeOpacity={0.7}
             >
               <Text style={styles.menuIcon}>{item.icon}</Text>

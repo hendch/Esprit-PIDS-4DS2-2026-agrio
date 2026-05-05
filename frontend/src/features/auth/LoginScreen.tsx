@@ -21,6 +21,7 @@ export function LoginScreen() {
   const nav = useNavigation<any>();
   const { colors } = useTheme();
   const setAuth = useUserStore((s) => s.setAuth);
+  const setTokens = useUserStore((s) => s.setTokens);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -42,7 +43,16 @@ export function LoginScreen() {
     setLoading(true);
     try {
       const result = await authApi.login(email.trim(), password);
+
+      setTokens({
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token,
+      });
+
+      const me = await authApi.me();
+
       setAuth({
+        id: me.id,
         displayName: "User",
         email: email.trim(),
         accessToken: result.access_token,
@@ -104,7 +114,7 @@ export function LoginScreen() {
         <View style={styles.inputContainer}>
           <View style={styles.passwordLabelRow}>
             <Text style={[styles.label, { color: colors.text }]}>Password</Text>
-            <TouchableOpacity onPress={() => {}}>
+            <TouchableOpacity onPress={() => { }}>
               <Text style={styles.forgotPasswordText}>Forgot password?</Text>
             </TouchableOpacity>
           </View>

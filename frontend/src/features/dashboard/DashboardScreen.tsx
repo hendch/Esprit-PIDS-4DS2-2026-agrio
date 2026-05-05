@@ -36,6 +36,7 @@ export function DashboardScreen() {
   const displayName = useUserStore((s) => s.displayName);
   const email = useUserStore((s) => s.email);
   const accessToken = useUserStore((s) => s.accessToken);
+  const [notifEnabled, setNotifEnabled] = useState(false);
   const setUser = useUserStore((s) => s.setUser);
   const [nameOverride, setNameOverride] = useState<string | null>(null);
   const greeting = getGreeting();
@@ -198,8 +199,13 @@ export function DashboardScreen() {
             Enable push notifications to receive instant alerts about critical crop health
             issues and irrigation system status.
           </Text>
-          <TouchableOpacity style={styles.enableNotificationsBtn}>
-            <Text style={styles.enableNotificationsText}>Enable Notifications</Text>
+          <TouchableOpacity
+            style={[styles.enableNotificationsBtn, notifEnabled && { backgroundColor: "#388E3C" }]}
+            disabled={notifEnabled}
+          >
+            <Text style={styles.enableNotificationsText}>
+              {notifEnabled ? "Notifications Enabled ✓" : "Enable Notifications"}
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

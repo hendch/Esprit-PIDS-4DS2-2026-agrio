@@ -1,13 +1,19 @@
 import { create } from "zustand";
 
 type UserState = {
+  id: string | null;
   displayName: string | null;
   email: string | null;
   accessToken: string | null;
   refreshToken: string | null;
   isAuthenticated: boolean;
+  setTokens: (params: {
+    accessToken: string;
+    refreshToken: string;
+  }) => void;
   setUser: (displayName: string, email?: string) => void;
   setAuth: (params: {
+    id: string;
     displayName: string;
     email?: string;
     accessToken: string;
@@ -23,18 +29,25 @@ function nameFromEmail(email: string): string {
 }
 
 export const useUserStore = create<UserState>((set) => ({
+  id: null,
   displayName: null,
   email: null,
   accessToken: null,
   refreshToken: null,
   isAuthenticated: false,
+  setTokens: ({ accessToken, refreshToken }) =>
+  set({
+    accessToken,
+    refreshToken,
+  }),
   setUser: (displayName, email) =>
     set({
       displayName,
       email: email ?? null,
     }),
-  setAuth: ({ displayName, email, accessToken, refreshToken }) =>
+  setAuth: ({ id, displayName, email, accessToken, refreshToken }) =>
     set({
+      id,
       displayName,
       email: email ?? null,
       accessToken,
@@ -43,6 +56,7 @@ export const useUserStore = create<UserState>((set) => ({
     }),
   clearUser: () =>
     set({
+      id: null,
       displayName: null,
       email: null,
       accessToken: null,

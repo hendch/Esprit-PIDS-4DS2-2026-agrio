@@ -75,6 +75,7 @@ def _register_middleware(application: FastAPI) -> None:
 
 
 def _register_routers(application: FastAPI) -> None:
+    from app.api.v1.messaging.routes import router as messaging_router
     from app.api.v1.ai.routes import router as ai_router
     from app.api.v1.analytics.routes import router as analytics_router
     from app.api.v1.auth.routes import router as auth_router
@@ -85,6 +86,8 @@ def _register_routers(application: FastAPI) -> None:
     from app.api.v1.ledger.routes import router as ledger_router
     from app.api.v1.livestock.routes import router as livestock_router
     from app.api.v1.satellite.routes import router as satellite_router
+
+    
 
     application.include_router(health_router, tags=["health"])
 
@@ -107,5 +110,8 @@ def _register_routers(application: FastAPI) -> None:
     application.include_router(ai_router, prefix=f"{prefix}/ai", tags=["ai"])
     application.include_router(ledger_router, prefix=f"{prefix}/ledger", tags=["ledger"])
 
+    application.include_router(
+        messaging_router, prefix=f"{prefix}/messaging", tags=["messaging"]
+    )
 
 app = create_app()

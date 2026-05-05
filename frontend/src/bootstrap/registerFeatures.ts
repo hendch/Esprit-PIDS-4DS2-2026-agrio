@@ -1,5 +1,5 @@
 import { featureRegistry } from "../core/featureRegistry/FeatureRegistry";
-
+import { messagingModule } from "../features/messaging/MessagingModule";
 import { authModule } from "../features/auth/AuthModule";
 import { dashboardModule } from "../features/dashboard/DashboardModule";
 import { irrigationModule } from "../features/irrigation/IrrigationModule";
@@ -16,7 +16,7 @@ let registered = false;
 export function registerFeatures() {
   if (registered) return;
   registered = true;
-
+  featureRegistry.register(messagingModule);
   featureRegistry.register(authModule);
   featureRegistry.register(dashboardModule);
   featureRegistry.register(irrigationModule);

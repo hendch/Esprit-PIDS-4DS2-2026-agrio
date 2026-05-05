@@ -27,6 +27,7 @@ async def get_async_session() -> AsyncIterator[AsyncSession]:
 
 async def init_models() -> None:
     # Import models so SQLAlchemy metadata includes all mapped tables.
+    from app.modules.messaging import models as _messaging_models  # noqa: F401
     from app.modules.analytics import models as _analytics_models  # noqa: F401
     from app.modules.auth import models as _auth_models  # noqa: F401
     from app.modules.disease import models as _disease_models  # noqa: F401
